@@ -1,23 +1,53 @@
 name: Baue LaTeX zu PDF
+
 on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'docs/exports/**'
+
 permissions:
   contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
-      - name: Compile LaTeX
+      - name: Repository auschecken
+        uses: actions/checkout@v3
+
+      - name: TeX-Dateien finden
+        id: find_tex
+        run: |
+          TEX_FILES=$(find docs -maxdepth 1 -type f -name "*.tex")
+          echo "files<<EOF" >> $GITHUB_OUTPUT
+          echo "$TEX_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: PDFs bauen
+        if: steps.find_tex.outputs.files != ''
         uses: xu-cheng/latex-action@v2
         with:
-          root_file: main.tex
-      - name: Commit PDF
+          root_file: ${{ steps.find_tex.outputs.files }}
+          work_in_root_file_dir: true
+          args: -pdf -interaction=nonstopmode -halt-on-error -outdir=exports
+
+      - name: Dateien nach docs/exports verschieben
+        if: steps.find_tex.outputs.files != ''
+        run: |
+          [ -d docs/exports ] && echo "Existiert bereits" || mkdir -p docs/exports
+
+          find docs -maxdepth 2 -type f -path "*/exports/*.pdf" | while read pdf; do
+            mv "$pdf" docs/exports/
+          done
+
+      - name: PDFs committen
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add main.pdf
-          git commit -m "PDF aktualisiert" || echo "Keine Änderungen"
+
+          git add docs/exports/*.pdf
+          git diff --cached --quiet || git commit -m "PDFs aktualisiert"
           git push
