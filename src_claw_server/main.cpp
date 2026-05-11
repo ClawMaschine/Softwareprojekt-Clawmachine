@@ -40,20 +40,8 @@ void setup() {
   Serial.println("[SERVER] Warte auf Client-Verbindung...");
 }
 
-void loop() {
-  if (!client.connected()) {
-    WiFiClient newClient = Server.available();
-    if (newClient) {
-      client = newClient;
-      client.setTimeout(20);
-      gClientRegistered = false;
-      gRegisteredClientName = "";
-      Serial.println("[SERVER] Client verbunden");
-    }
-  }
-
-  if (client.connected() && client.available()) {
-    String message = client.readStringUntil('\n');
+void checkForMessages(){
+  String message = client.readStringUntil('\n');
     message.trim();
 
     if (message.length() > 0) {
@@ -68,6 +56,22 @@ void loop() {
         Serial.println(message);
       }
     }
+}
+
+void loop() {
+  if (!client.connected()) {
+    WiFiClient newClient = Server.available();
+    if (newClient) {
+      client = newClient;
+      client.setTimeout(20);
+      gClientRegistered = false;
+      gRegisteredClientName = "";
+      Serial.println("[SERVER] Client verbunden");
+    }
+  }
+
+  if (client.connected() && client.available()) {
+    checkForMessages();
   }
 
   if (!client.connected()) {

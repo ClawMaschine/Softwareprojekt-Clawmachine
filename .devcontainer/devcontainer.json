@@ -13,7 +13,8 @@
     }
   },
   "mounts": [
-    "source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind"
+    "source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind", 
+    "source=/dev,target=/dev,type=bind"
   ],
   "postCreateCommand": "pio pkg install",
   "postStartCommand": "mkdir -p /home/vscode/.ssh && (ssh-keygen -F github.com -f /home/vscode/.ssh/known_hosts >/dev/null 2>&1 || ssh-keyscan github.com >> /home/vscode/.ssh/known_hosts 2>/dev/null) || true"
