@@ -3,3 +3,9 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+__pycache__/
+*.pyc
+.venv/
+data/index.html
+data/style.css
+docker/mosquitto/data/mosquitto.db
