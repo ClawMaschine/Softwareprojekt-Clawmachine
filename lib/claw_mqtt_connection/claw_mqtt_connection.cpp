@@ -34,9 +34,13 @@ void ClawMqttConnection::maintainConnection()
 
   ensureMqttConnected();
   mqttClient.loop();
-  mqttClient.publish("claw/test", "hello world");
+  unsigned long uptimeMilliSeconds = millis();
+  unsigned long uptimeSeconds = uptimeMilliSeconds / 1000;
+  unsigned long uptimeMinutes = uptimeSeconds / 60;
 
-
+  mqttClient.publish("claw/uptime_milliseconds", String(uptimeMilliSeconds).c_str());
+  mqttClient.publish("claw/uptime_seconds", String(uptimeSeconds).c_str());
+  mqttClient.publish("claw/uptime_minutes", String(uptimeMinutes).c_str());
   
 }
 
