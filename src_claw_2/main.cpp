@@ -1,83 +1,57 @@
-#include <cstring>
-#include <cstdio>
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEScan.h>
+#include <BLEAdvertisedDevice.h>
 
-extern "C" {
-#include "nvs_flash.h"
-#include "esp_log.h"
-#include "esp_bt.h"
-#include "esp_bt_main.h"
-#include "esp_gap_bt_api.h"
-#include "esp_hidh.h"
-}
+#define SCAN_TIME 5   // Sekunden
 
-static const char *TAG = "JOYCON";
+BLEScan* pBLEScan;
 
-static void hidh_callback(void *handler_args,
-                          esp_event_base_t base,
-                          int32_t id,
-                          void *event_data)
-{
-    auto *event = static_cast<esp_hidh_event_data_t *>(event_data);
+class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
+  void onResult(BLEAdvertisedDevice device) override {
+    Serial.println("----- Bluetooth Gerät gefunden -----");
 
-    switch (id) {
-    case ESP_HIDH_OPEN_EVENT:
-        ESP_LOGI(TAG, "Joy-Con verbunden");
-        break;
-
-    case ESP_HIDH_INPUT_EVENT:
-        ESP_LOGI(TAG, "Input Report empfangen, Länge: %d", event->input.length);
-
-        for (int i = 0; i < event->input.length; i++) {
-            printf("%02X ", event->input.data[i]);
-        }
-        printf("\n");
-        break;
-
-    case ESP_HIDH_CLOSE_EVENT:
-        ESP_LOGI(TAG, "Joy-Con getrennt");
-        break;
-
-    default:
-        break;
-    }
-}
-
-static void scan_callback(esp_hid_scan_result_t *result)
-{
-    if (result == nullptr || result->name == nullptr) {
-        return;
+    Serial.print("Name: ");
+    if (device.haveName()) {
+      Serial.println(device.getName().c_str());
+    } else {
+      Serial.println("(kein Name)");
     }
 
-    ESP_LOGI(TAG, "Gefunden: %s", result->name);
+    Serial.print("MAC: ");
+    Serial.println(device.getAddress().toString().c_str());
 
-    if (strstr(result->name, "Joy-Con") != nullptr) {
-        ESP_LOGI(TAG, "Joy-Con erkannt, verbinde...");
+    Serial.print("RSSI: ");
+    Serial.println(device.getRSSI());
 
-        esp_hidh_dev_open(
-            result->bda,
-            result->transport,
-            result->ble.addr_type
-        );
-    }
+    Serial.println("------------------------------------");
+  }
+};
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  Serial.println("ESP32 Bluetooth Scanner startet...");
+
+  BLEDevice::init("");
+
+  pBLEScan = BLEDevice::getScan();
+  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
+  pBLEScan->setActiveScan(true);
+  pBLEScan->setInterval(100);
+  pBLEScan->setWindow(99);
 }
 
-extern "C" void app_main()
-{
-    ESP_ERROR_CHECK(nvs_flash_init());
+void loop() {
+  Serial.println("Scan läuft...");
 
-    esp_hidh_config_t config = {
-        .callback = hidh_callback,
-        .event_stack_size = 4096,
-        .callback_arg = nullptr
-    };
+  BLEScanResults results = pBLEScan->start(SCAN_TIME, false);
 
-    ESP_ERROR_CHECK(esp_hidh_init(&config));
+  Serial.print("Gefundene Geräte: ");
+  Serial.println(results.getCount());
 
-    ESP_LOGI(TAG, "Scanne nach Joy-Con...");
+  pBLEScan->clearResults();
 
-    esp_hid_scan(
-        10,
-        sizeof(esp_hid_scan_result_t),
-        scan_callback
-    );
+  delay(2000);
 }
