@@ -1,5 +1,8 @@
 #include "claw_mqtt_connection.h"
 
+#include <ArduinoJson.h>
+
+
 ClawMqttConnection::ClawMqttConnection(
     const char *wifiSsid,
     const char *wifiPassword,
@@ -31,6 +34,10 @@ void ClawMqttConnection::maintainConnection()
 
   ensureMqttConnected();
   mqttClient.loop();
+  mqttClient.publish("claw/test", "hello world");
+
+
+  
 }
 
 bool ClawMqttConnection::ensureWifiConnected()
