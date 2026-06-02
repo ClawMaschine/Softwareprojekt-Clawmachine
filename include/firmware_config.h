@@ -24,14 +24,6 @@
 #define CLAW_MQTT_BROKER_PORT 1883
 #endif
 
-#ifndef CLAW_CONTROL_PANEL_CLIENT_ID
-#define CLAW_CONTROL_PANEL_CLIENT_ID "control_panel"
-#endif
-
-#ifndef CLAW_MOTOR_CONTROLLER_CLIENT_ID
-#define CLAW_MOTOR_CONTROLLER_CLIENT_ID "motor_controller"
-#endif
-
 #ifndef SWITCH_JOYCON_RIGHT_CLIENT_ID
 #define SWITCH_JOYCON_RIGHT_CLIENT_ID "Joy-Con (R)"
 #endif
