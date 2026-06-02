@@ -1,11 +1,11 @@
 #pragma once
 
 #ifndef CLAW_CLIENT_WIFI_SSID
-#define CLAW_CLIENT_WIFI_SSID "TP-LINK_9688"
+#define CLAW_CLIENT_WIFI_SSID "praktikum"
 #endif
 
 #ifndef CLAW_CLIENT_WIFI_PASSWORD
-#define CLAW_CLIENT_WIFI_PASSWORD "88103198"
+#define CLAW_CLIENT_WIFI_PASSWORD ""
 #endif
 
 #ifndef CLAW_SERVER_TCP_PORT
