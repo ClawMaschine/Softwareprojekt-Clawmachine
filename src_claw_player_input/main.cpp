@@ -3,7 +3,18 @@
 #include "esp_bt_device.h"
 #include "esp_gap_bt_api.h"
 
+#include "claw_mqtt_connection.h"
+#include "firmware_config.h"
+
 BluetoothSerial SerialBT;
+
+ClawMqttConnection playerInputConnection(
+    CLAW_CLIENT_WIFI_SSID,
+    CLAW_CLIENT_WIFI_PASSWORD,
+    CLAW_MQTT_BROKER_HOST,
+    CLAW_MQTT_BROKER_PORT,
+    CLAW_PLAYER_INPUT_CLIENT_ID,
+    CLAW_CONNECTION_RETRY_INTERVAL_MS);
 
 void btAdvertisedDeviceFound(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 {
@@ -66,6 +77,11 @@ void setup()
   Serial.begin(115200);
   delay(1000);
 
+  Serial.println("[PLAYER_INPUT] MQTT client starts");
+  Serial.print("[PLAYER_INPUT] Client ID: ");
+  Serial.println(CLAW_PLAYER_INPUT_CLIENT_ID);
+  playerInputConnection.begin();
+
   Serial.println("Classic Bluetooth Scanner startet...");
 
   if (!SerialBT.begin("ESP32_BT_SCANNER"))
@@ -82,5 +98,6 @@ void setup()
 
 void loop()
 {
+  playerInputConnection.maintainConnection();
   delay(1000);
 }
