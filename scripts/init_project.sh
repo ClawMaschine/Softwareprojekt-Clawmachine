@@ -96,10 +96,6 @@ if ! $has_docker; then
     missing_requirements+=("docker")
 fi
 
-if ! $has_docker_compose; then
-    missing_requirements+=("docker-compose-plugin")
-fi
-
 if [[ "${#missing_requirements[@]}" -eq 0 ]]; then
     printf 'Alle Voraussetzungen sind vorhanden.\n'
 else
@@ -117,9 +113,28 @@ if [[ "${#missing_requirements[@]}" -gt 0 ]]; then
         exit 1
     fi
 
+    run_as_root "# Add Docker's official GPG key:
+sudo apt update
+sudo apt install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+# Add the repository to Apt sources:
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+sudo apt update"
+
     print_info "Installiere Systempakete"
     run_as_root apt-get update
-    run_as_root apt-get install -y docker.io docker-compose-plugin python3 python3-pip python3-venv mosquitto-clients
+    run_as_root apt-get install -y  python3 python3-pip python3-venv mosquitto-clients
 
     if [[ "$EUID" -ne 0 ]]; then
         run_as_root usermod -aG docker "$USER" || true
