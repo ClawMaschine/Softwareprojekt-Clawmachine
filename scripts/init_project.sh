@@ -51,6 +51,7 @@ has_venv_module=false
 has_docker=false
 has_docker_compose=false
 has_apt=false
+needs_docker_install=false
 
 if command -v python3 >/dev/null 2>&1; then
     has_python3=true
@@ -94,6 +95,12 @@ fi
 
 if ! $has_docker; then
     missing_requirements+=("docker")
+    needs_docker_install=true
+fi
+
+if ! $has_docker_compose; then
+    missing_requirements+=("docker-compose-plugin")
+    needs_docker_install=true
 fi
 
 if [[ "${#missing_requirements[@]}" -eq 0 ]]; then
@@ -113,28 +120,31 @@ if [[ "${#missing_requirements[@]}" -gt 0 ]]; then
         exit 1
     fi
 
-    run_as_root "# Add Docker's official GPG key:
-sudo apt update
-sudo apt install ca-certificates curl
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
+    if $needs_docker_install; then
+        run_as_root apt-get update
+        run_as_root apt-get install -y ca-certificates curl
+        run_as_root install -m 0755 -d /etc/apt/keyrings
+        run_as_root curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+        run_as_root chmod a+r /etc/apt/keyrings/docker.asc
 
-# Add the repository to Apt sources:
-sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
-Types: deb
-URIs: https://download.docker.com/linux/ubuntu
-Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
-Components: stable
-Architectures: $(dpkg --print-architecture)
-Signed-By: /etc/apt/keyrings/docker.asc
-EOF
+        docker_distribution_codename="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")"
+        docker_architecture="$(dpkg --print-architecture)"
 
-sudo apt update"
+        printf 'Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: %s\nComponents: stable\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/docker.asc\n' \
+            "$docker_distribution_codename" \
+            "$docker_architecture" | run_as_root tee /etc/apt/sources.list.d/docker.sources >/dev/null
+
+        run_as_root apt-get update
+    fi
 
     print_info "Installiere Systempakete"
-    run_as_root apt-get update
-    run_as_root apt-get install -y  python3 python3-pip python3-venv mosquitto-clients
+    system_packages=(python3 python3-pip python3-venv mosquitto-clients)
+
+    if $needs_docker_install; then
+        system_packages+=(docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin)
+    fi
+
+    run_as_root apt-get install -y "${system_packages[@]}"
 
     if [[ "$EUID" -ne 0 ]]; then
         run_as_root usermod -aG docker "$USER" || true
