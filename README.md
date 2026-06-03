@@ -17,6 +17,13 @@ pip install -r python_server/requirements.txt
 python -m python_server
 ```
 
+Oder mit den neuen Skripten:
+
+```bash
+./scripts/init_project.sh
+./scripts/start_project.sh
+```
+
 Dann im Browser: `http://127.0.0.1:8080`
 
 ### Konfiguration per Umgebungsvariablen
