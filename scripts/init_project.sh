@@ -124,13 +124,13 @@ if [[ "${#missing_requirements[@]}" -gt 0 ]]; then
         run_as_root apt-get update
         run_as_root apt-get install -y ca-certificates curl
         run_as_root install -m 0755 -d /etc/apt/keyrings
-        run_as_root curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+        run_as_root curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
         run_as_root chmod a+r /etc/apt/keyrings/docker.asc
 
-        docker_distribution_codename="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")"
+        docker_distribution_codename="$(. /etc/os-release && echo "${DEBIAN_CODENAME:-$VERSION_CODENAME}")"
         docker_architecture="$(dpkg --print-architecture)"
 
-        printf 'Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: %s\nComponents: stable\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/docker.asc\n' \
+        printf 'Types: deb\nURIs: https://download.docker.com/linux/debian\nSuites: %s\nComponents: stable\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/docker.asc\n' \
             "$docker_distribution_codename" \
             "$docker_architecture" | run_as_root tee /etc/apt/sources.list.d/docker.sources >/dev/null
 
