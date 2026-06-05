@@ -12,6 +12,8 @@ public:
       const char *mqttBrokerHost,
       uint16_t mqttBrokerPort,
       const char *mqttClientId,
+      const char *mqttUsername,
+      const char *mqttPassword,
       unsigned long reconnectIntervalMilliseconds);
 
   void begin();
@@ -26,6 +28,8 @@ private:
   const char *mqttBrokerHost;
   uint16_t mqttBrokerPort;
   const char *mqttClientId;
+  const char *mqttUsername;
+  const char *mqttPassword;
   unsigned long reconnectIntervalMilliseconds;
   unsigned long lastWifiConnectAttemptMilliseconds;
   unsigned long lastMqttConnectAttemptMilliseconds;

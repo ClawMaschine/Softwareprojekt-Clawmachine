@@ -9,12 +9,16 @@ ClawMqttConnection::ClawMqttConnection(
     const char *mqttBrokerHost,
     uint16_t mqttBrokerPort,
     const char *mqttClientId,
+    const char *mqttUsername,
+    const char *mqttPassword,
     unsigned long reconnectIntervalMilliseconds)
     : wifiSsid(wifiSsid),
       wifiPassword(wifiPassword),
       mqttBrokerHost(mqttBrokerHost),
       mqttBrokerPort(mqttBrokerPort),
       mqttClientId(mqttClientId),
+      mqttUsername(mqttUsername),
+      mqttPassword(mqttPassword),
       reconnectIntervalMilliseconds(reconnectIntervalMilliseconds),
       lastWifiConnectAttemptMilliseconds(0),
       lastMqttConnectAttemptMilliseconds(0),
@@ -94,7 +98,7 @@ bool ClawMqttConnection::ensureMqttConnected()
   Serial.print(':');
   Serial.println(mqttBrokerPort);
 
-  const bool connectionSuccessful = mqttClient.connect(mqttClientId);
+  const bool connectionSuccessful = mqttClient.connect(mqttClientId, mqttUsername, mqttPassword);
   if (!connectionSuccessful) {
     Serial.print("[MQTT_CLIENT] Broker connection failed, rc=");
     Serial.println(mqttClient.state());
