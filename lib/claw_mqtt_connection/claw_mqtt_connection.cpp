@@ -38,13 +38,9 @@ void ClawMqttConnection::maintainConnection()
 
   ensureMqttConnected();
   mqttClient.loop();
-  unsigned long uptimeMilliSeconds = millis();
-  unsigned long uptimeSeconds = uptimeMilliSeconds / 1000;
-  unsigned long uptimeMinutes = uptimeSeconds / 60;
 
-  mqttClient.publish("claw/uptime_milliseconds", String(uptimeMilliSeconds).c_str());
-  mqttClient.publish("claw/uptime_seconds", String(uptimeSeconds).c_str());
-  mqttClient.publish("claw/uptime_minutes", String(uptimeMinutes).c_str());
+  String uptimeTopic = String("clawmachine/") + mqttClientId + "/metadata/uptime";
+  mqttClient.publish(uptimeTopic.c_str(), String(millis()).c_str());
   
 }
 
@@ -98,7 +94,10 @@ bool ClawMqttConnection::ensureMqttConnected()
   Serial.print(':');
   Serial.println(mqttBrokerPort);
 
-  const bool connectionSuccessful = mqttClient.connect(mqttClientId, mqttUsername, mqttPassword);
+  String statusTopic = String("clawmachine/") + mqttClientId + "/status";
+  const bool connectionSuccessful = mqttClient.connect(
+      mqttClientId, nullptr, nullptr,
+      statusTopic.c_str(), 1, true, "offline");
   if (!connectionSuccessful) {
     Serial.print("[MQTT_CLIENT] Broker connection failed, rc=");
     Serial.println(mqttClient.state());
@@ -107,5 +106,6 @@ bool ClawMqttConnection::ensureMqttConnected()
 
   Serial.print("[MQTT_CLIENT] MQTT connected as ");
   Serial.println(mqttClientId);
+  mqttClient.publish(statusTopic.c_str(), "online", true);
   return true;
 }
