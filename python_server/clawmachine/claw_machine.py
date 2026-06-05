@@ -50,6 +50,8 @@ class ClawMachine:
             broker=mqtt_configuration.broker,
             port=mqtt_configuration.port,
             connect_timeout_seconds=mqtt_configuration.connect_timeout_seconds,
+            username=mqtt_configuration.username,
+            password=mqtt_configuration.password,
         )
         self.mqtt_client.connect()
         self.esp_controller = MQTTEspController(self.mqtt_client)

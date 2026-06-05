@@ -1,6 +1,7 @@
 from configparser import ConfigParser
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -11,6 +12,8 @@ class MqttConfiguration:
     device_added_topic: str
     client_id: str
     connect_timeout_seconds: float
+    username: Optional[str]
+    password: Optional[str]
 
 
 def load_mqtt_configuration() -> MqttConfiguration:
@@ -28,6 +31,8 @@ def load_mqtt_configuration() -> MqttConfiguration:
     connect_timeout_seconds = config_parser.getfloat(
         "mqtt", "connect_timeout_seconds", fallback=5.0
     )
+    username = config_parser.get("mqtt", "username", fallback=None)
+    password = config_parser.get("mqtt", "password", fallback=None)
 
     return MqttConfiguration(
         broker=broker,
@@ -36,4 +41,6 @@ def load_mqtt_configuration() -> MqttConfiguration:
         device_added_topic=device_added_topic,
         client_id=client_id,
         connect_timeout_seconds=connect_timeout_seconds,
+        username=username,
+        password=password,
     )
