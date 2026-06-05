@@ -8,6 +8,8 @@ class MqttConfiguration:
     broker: str
     port: int
     topic: str
+    username: str
+    password: str
     device_added_topic: str
     client_id: str
     connect_timeout_seconds: float
@@ -28,12 +30,16 @@ def load_mqtt_configuration() -> MqttConfiguration:
     connect_timeout_seconds = config_parser.getfloat(
         "mqtt", "connect_timeout_seconds", fallback=5.0
     )
+    username = config_parser.get("mqtt", "username", fallback=None)
+    password = config_parser.get("mqtt", "password", fallback=None)
 
     return MqttConfiguration(
         broker=broker,
         port=port,
         topic=topic,
         device_added_topic=device_added_topic,
+        username=username,
+        password=password,
         client_id=client_id,
         connect_timeout_seconds=connect_timeout_seconds,
     )
