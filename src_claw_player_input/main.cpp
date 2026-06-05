@@ -1,12 +1,8 @@
 #include <Arduino.h>
-#include "BluetoothSerial.h"
-#include "esp_bt_device.h"
-#include "esp_gap_bt_api.h"
+#include <Bluepad32.h>
 
 #include "claw_mqtt_connection.h"
 #include "firmware_config.h"
-
-BluetoothSerial SerialBT;
 
 ClawMqttConnection playerInputConnection(
     CLAW_CLIENT_WIFI_SSID,
@@ -16,88 +12,120 @@ ClawMqttConnection playerInputConnection(
     CLAW_PLAYER_INPUT_CLIENT_ID,
     CLAW_CONNECTION_RETRY_INTERVAL_MS);
 
-void btAdvertisedDeviceFound(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
+ControllerPtr connectedControllers[BP32_MAX_GAMEPADS];
+
+static unsigned long lastControllerReadMs = 0;
+
+void onConnectedController(ControllerPtr controller)
 {
-  if (event == ESP_BT_GAP_DISC_RES_EVT)
-  {
-    Serial.println("----- Classic Bluetooth Gerät gefunden -----");
-
-    char bda_str[18];
-    snprintf(bda_str, sizeof(bda_str),
-             "%02X:%02X:%02X:%02X:%02X:%02X",
-             param->disc_res.bda[0], param->disc_res.bda[1],
-             param->disc_res.bda[2], param->disc_res.bda[3],
-             param->disc_res.bda[4], param->disc_res.bda[5]);
-
-    Serial.print("MAC: ");
-    Serial.println(bda_str);
-
-    for (int i = 0; i < param->disc_res.num_prop; i++)
+    for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
     {
-      esp_bt_gap_dev_prop_t prop = param->disc_res.prop[i];
-
-      if (prop.type == ESP_BT_GAP_DEV_PROP_EIR)
-      {
-        uint8_t len = 0;
-        uint8_t *name = esp_bt_gap_resolve_eir_data(
-            (uint8_t *)prop.val,
-            ESP_BT_EIR_TYPE_CMPL_LOCAL_NAME,
-            &len);
-
-        if (name)
+        if (connectedControllers[i] == nullptr)
         {
-          Serial.print("Name: ");
-          Serial.write(name, len);
-          Serial.println();
+            connectedControllers[i] = controller;
+
+            Serial.print("[BLUEPAD32] Controller connected at index ");
+            Serial.println(i);
+
+            ControllerProperties properties = controller->getProperties();
+            Serial.printf(
+                "[BLUEPAD32] BTAddr: %02x:%02x:%02x:%02x:%02x:%02x\n",
+                properties.btaddr[0], properties.btaddr[1],
+                properties.btaddr[2], properties.btaddr[3],
+                properties.btaddr[4], properties.btaddr[5]);
+
+            return;
         }
-      }
-
-      if (prop.type == ESP_BT_GAP_DEV_PROP_RSSI)
-      {
-        Serial.print("RSSI: ");
-        Serial.println(*(int8_t *)prop.val);
-      }
     }
 
-    Serial.println("--------------------------------------------");
-  }
-  else if (event == ESP_BT_GAP_DISC_STATE_CHANGED_EVT)
-  {
-    if (param->disc_st_chg.state == ESP_BT_GAP_DISCOVERY_STOPPED)
+    Serial.println("[BLUEPAD32] Controller connected, but no free slot available");
+}
+
+void onDisconnectedController(ControllerPtr controller)
+{
+    for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
     {
-      Serial.println("Scan fertig.");
-      Serial.println("Starte neuen Scan...");
-      esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, 10, 0);
+        if (connectedControllers[i] == controller)
+        {
+            connectedControllers[i] = nullptr;
+
+            Serial.print("[BLUEPAD32] Controller disconnected from index ");
+            Serial.println(i);
+            return;
+        }
     }
-  }
+
+    Serial.println("[BLUEPAD32] Disconnected controller was not found");
+}
+
+void readControllerInput(ControllerPtr controller, int index)
+{
+    if (!controller->isConnected() || !controller->hasData())
+    {
+        return;
+    }
+
+    Serial.print("[JOYCON ");
+    Serial.print(index);
+    Serial.print("] ");
+    Serial.print("axisX=");      Serial.print(controller->axisX());
+    Serial.print(" axisY=");     Serial.print(controller->axisY());
+    Serial.print(" axisRX=");    Serial.print(controller->axisRX());
+    Serial.print(" axisRY=");    Serial.print(controller->axisRY());
+    Serial.print(" buttons=0x"); Serial.print(controller->buttons(), HEX);
+    Serial.print(" dpad=0x");    Serial.println(controller->dpad(), HEX);
+
+    // TODO: Controller-Input per MQTT publizieren
 }
 
 void setup()
 {
-  Serial.begin(115200);
-  delay(1000);
+    Serial.begin(115200);
+    delay(500);
 
-  Serial.println("[PLAYER_INPUT] MQTT client starts");
-  Serial.print("[PLAYER_INPUT] Client ID: ");
-  Serial.println(CLAW_PLAYER_INPUT_CLIENT_ID);
-  playerInputConnection.begin();
+    Serial.println("[PLAYER_INPUT] MQTT client starts");
+    Serial.print("[PLAYER_INPUT] Client ID: ");
+    Serial.println(CLAW_PLAYER_INPUT_CLIENT_ID);
+    playerInputConnection.begin();
 
-  Serial.println("Classic Bluetooth Scanner startet...");
+    Serial.println("[BLUEPAD32] Starting...");
 
-  if (!SerialBT.begin("ESP32_BT_SCANNER"))
-  {
-    Serial.println("Bluetooth Start fehlgeschlagen!");
-    return;
-  }
+    const uint8_t *address = BP32.localBdAddress();
+    Serial.print("[BLUEPAD32] Local BT address: ");
+    for (int i = 0; i < 6; i++)
+    {
+        if (i > 0) Serial.print(":");
+        Serial.printf("%02X", address[i]);
+    }
+    Serial.println();
 
-  esp_bt_gap_register_callback(btAdvertisedDeviceFound);
+    BP32.setup(&onConnectedController, &onDisconnectedController);
+    BP32.forgetBluetoothKeys();
+    BP32.enableVirtualDevice(false);
 
-  Serial.println("Starte Classic Bluetooth Inquiry...");
-  esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, 10, 0);
+    Serial.println("[BLUEPAD32] Ready. Put Joy-Con into pairing mode.");
 }
 
 void loop()
 {
-  playerInputConnection.maintainConnection();
-  delay(1000);
+    playerInputConnection.maintainConnection();
+
+    bool dataUpdated = BP32.update();
+    if (dataUpdated)
+    {
+        unsigned long now = millis();
+        if (now - lastControllerReadMs >= 100)
+        {
+            lastControllerReadMs = now;
+            for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
+            {
+                if (connectedControllers[i] != nullptr)
+                {
+                    readControllerInput(connectedControllers[i], i);
+                }
+            }
+        }
+    }
+
+    delay(10);
 }

@@ -1,8 +1,5 @@
 #include "claw_mqtt_connection.h"
 
-#include <ArduinoJson.h>
-
-
 ClawMqttConnection::ClawMqttConnection(
     const char *wifiSsid,
     const char *wifiPassword,
