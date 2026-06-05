@@ -25,10 +25,10 @@ class MQTTClient:
     def connect(self):
         def on_connect(client, userdata, flags, rc):
             if rc == 0:
-                print("Connected to MQTT Broker!")
+                print(f"Connected to MQTT Broker!")
                 self.is_connected = True
             else:
-                print("Failed to connect, return code %d\n", rc)
+                print(f"Failed to connect, return code %d\n", rc)
                 self.is_connected = False
 
         self.client = mqtt_client.Client(self.client_id)
@@ -49,7 +49,6 @@ class MQTTClient:
             raise TimeoutError(
                 f"MQTT connection to {self.broker}:{self.port} timed out after {self.connect_timeout_seconds} seconds"
             )
-
         return self.client
 
     def publish(self, topic, msg):

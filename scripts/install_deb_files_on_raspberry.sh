@@ -5,10 +5,6 @@ script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_root_directory="$(dirname "$script_directory")"
 deb_files_directory="$repository_root_directory/data/deb_files"
 
-if [[ ! -d "$deb_files_directory" ]]; then
-  echo "Directory not found: $deb_files_directory" >&2
-  exit 1
-fi
 
 mapfile -t deb_package_paths < <(find "$deb_files_directory" -maxdepth 1 -type f -name "*.deb" | sort)
 

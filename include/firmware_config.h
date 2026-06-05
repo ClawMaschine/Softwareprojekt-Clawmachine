@@ -24,6 +24,14 @@
 #define CLAW_MQTT_BROKER_PORT 1883
 #endif
 
+#ifndef CLAW_MQTT_USERNAME
+#define CLAW_MQTT_USERNAME "clawmachine"
+#endif
+
+#ifndef CLAW_MQTT_PASSWORD
+#define CLAW_MQTT_PASSWORD "claw_secret"
+#endif
+
 #ifndef CLAW_CONTROL_PANEL_CLIENT_ID
 #define CLAW_CONTROL_PANEL_CLIENT_ID "control_panel"
 #endif
