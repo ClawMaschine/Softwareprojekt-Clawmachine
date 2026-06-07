@@ -107,5 +107,40 @@ bool ClawMqttConnection::ensureMqttConnected()
   Serial.print("[MQTT_CLIENT] MQTT connected as ");
   Serial.println(mqttClientId);
   mqttClient.publish(statusTopic.c_str(), "online", true);
+  resubscribeAll();
   return true;
+}
+
+void ClawMqttConnection::setMessageCallback(void (*callback)(char *, uint8_t *, unsigned int))
+{
+  mqttClient.setCallback(callback);
+}
+
+void ClawMqttConnection::subscribe(const char *topic)
+{
+  if (subscribedTopicCount >= MAX_SUBSCRIPTIONS) {
+    Serial.println("[MQTT_CLIENT] Max subscriptions reached");
+    return;
+  }
+  subscribedTopics[subscribedTopicCount++] = String(topic);
+  if (mqttClient.connected()) {
+    mqttClient.subscribe(topic);
+  }
+}
+
+void ClawMqttConnection::publish(const char *topic, const char *payload)
+{
+  if (!mqttClient.connected()) {
+    return;
+  }
+  mqttClient.publish(topic, payload);
+}
+
+void ClawMqttConnection::resubscribeAll()
+{
+  for (uint8_t i = 0; i < subscribedTopicCount; i++) {
+    mqttClient.subscribe(subscribedTopics[i].c_str());
+    Serial.print("[MQTT_CLIENT] Resubscribed to ");
+    Serial.println(subscribedTopics[i]);
+  }
 }

@@ -1,0 +1,191 @@
+#include <Arduino.h>
+#include <Bluepad32.h>
+
+#include "claw_mqtt_connection.h"
+#include "firmware_config.h"
+#include "joy_con_input.h"
+#include "panel_input.h"
+
+static constexpr const char *JOYCON_TOPIC = "clawmachine/player_input/joycon";
+static constexpr const char *PANEL_TOPIC  = "clawmachine/player_input/panel";
+
+ClawMqttConnection playerInputConnection(
+    CLAW_CLIENT_WIFI_SSID,
+    CLAW_CLIENT_WIFI_PASSWORD,
+    CLAW_MQTT_BROKER_HOST,
+    CLAW_MQTT_BROKER_PORT,
+    CLAW_PLAYER_INPUT_CLIENT_ID,
+    CLAW_CONNECTION_RETRY_INTERVAL_MS);
+
+ControllerPtr connectedControllers[BP32_MAX_GAMEPADS];
+JoyConInput joyConInput;
+PanelInput  panelInput;
+
+static unsigned long lastInputReadMs = 0;
+
+// ── Bluepad32 callbacks ──────────────────────────────────────────────────────
+
+void onConnectedController(ControllerPtr controller)
+{
+    for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
+    {
+        if (connectedControllers[i] == nullptr)
+        {
+            connectedControllers[i] = controller;
+            Serial.print("[BLUEPAD32] Controller connected at index ");
+            Serial.println(i);
+
+            ControllerProperties properties = controller->getProperties();
+            Serial.printf(
+                "[BLUEPAD32] BTAddr: %02x:%02x:%02x:%02x:%02x:%02x\n",
+                properties.btaddr[0], properties.btaddr[1],
+                properties.btaddr[2], properties.btaddr[3],
+                properties.btaddr[4], properties.btaddr[5]);
+            return;
+        }
+    }
+    Serial.println("[BLUEPAD32] Controller connected, but no free slot available");
+}
+
+void onDisconnectedController(ControllerPtr controller)
+{
+    for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
+    {
+        if (connectedControllers[i] == controller)
+        {
+            connectedControllers[i] = nullptr;
+            Serial.print("[BLUEPAD32] Controller disconnected from index ");
+            Serial.println(i);
+            return;
+        }
+    }
+    Serial.println("[BLUEPAD32] Disconnected controller was not found");
+}
+
+// ── Publishing ───────────────────────────────────────────────────────────────
+
+static void publishJoyConInput()
+{
+    char buf[16];
+
+    // Achsen auf -100..100 skalieren (Bluepad32: -512..511)
+    int speedX = map(joyConInput.axis_x, -512, 511, -100, 100);
+    int speedY = map(joyConInput.axis_y, -512, 511, -100, 100);
+
+    snprintf(buf, sizeof(buf), "x:%d", speedX);
+    playerInputConnection.publish(JOYCON_TOPIC, buf);
+
+    snprintf(buf, sizeof(buf), "y:%d", speedY);
+    playerInputConnection.publish(JOYCON_TOPIC, buf);
+
+    int joyClawSpeed = joyConInput.a_button ? -100
+                     : joyConInput.b_button ?  100
+                     : 0;
+    snprintf(buf, sizeof(buf), "claw:%d", joyClawSpeed);
+    playerInputConnection.publish(JOYCON_TOPIC, buf);
+}
+
+static void publishPanelInput()
+{
+    if (!panelInput.isValid())
+    {
+        Serial.println("[PANEL] Konflikt: Links+Rechts oder Hoch+Runter gleichzeitig — wird nicht gesendet");
+        return;
+    }
+
+    char buf[16];
+
+    int speedX = panelInput.right_button ? 100 : (panelInput.left_button  ? -100 : 0);
+    int speedY = panelInput.down_button  ? 100 : (panelInput.up_button    ? -100 : 0);
+
+    snprintf(buf, sizeof(buf), "x:%d", speedX);
+    playerInputConnection.publish(PANEL_TOPIC, buf);
+
+    snprintf(buf, sizeof(buf), "y:%d", speedY);
+    playerInputConnection.publish(PANEL_TOPIC, buf);
+
+    int panelClawSpeed = panelInput.grab_button    ? -100
+                       : panelInput.release_button ?  100
+                       : 0;
+    snprintf(buf, sizeof(buf), "claw:%d", panelClawSpeed);
+    playerInputConnection.publish(PANEL_TOPIC, buf);
+}
+
+// ── Controller read ──────────────────────────────────────────────────────────
+
+static void readControllerInput(ControllerPtr controller)
+{
+    if (!controller->isConnected() || !controller->hasData())
+    {
+        return;
+    }
+
+    joyConInput.update(controller);
+    publishJoyConInput();
+
+    Serial.printf("[JOYCON] x=%d y=%d up=%d down=%d left=%d right=%d A=%d B=%d\n",
+        joyConInput.axis_x, joyConInput.axis_y,
+        joyConInput.up_button, joyConInput.down_button,
+        joyConInput.left_button, joyConInput.right_button,
+        joyConInput.a_button, joyConInput.b_button);
+}
+
+// ── Arduino entry points ─────────────────────────────────────────────────────
+
+void setup()
+{
+    Serial.begin(115200);
+    delay(500);
+
+    Serial.println("[PLAYER_INPUT] MQTT client starts");
+    Serial.print("[PLAYER_INPUT] Client ID: ");
+    Serial.println(CLAW_PLAYER_INPUT_CLIENT_ID);
+    playerInputConnection.begin();
+
+    panelInput.begin();
+
+    Serial.println("[BLUEPAD32] Starting...");
+    const uint8_t *address = BP32.localBdAddress();
+    Serial.print("[BLUEPAD32] Local BT address: ");
+    for (int i = 0; i < 6; i++)
+    {
+        if (i > 0) Serial.print(":");
+        Serial.printf("%02X", address[i]);
+    }
+    Serial.println();
+
+    BP32.setup(&onConnectedController, &onDisconnectedController);
+    BP32.forgetBluetoothKeys();
+    BP32.enableVirtualDevice(false);
+
+    Serial.println("[BLUEPAD32] Ready. Put Joy-Con into pairing mode.");
+}
+
+void loop()
+{
+    playerInputConnection.maintainConnection();
+
+    unsigned long now = millis();
+    if (now - lastInputReadMs >= 100)
+    {
+        lastInputReadMs = now;
+
+        // Hardware Panel
+        panelInput.read();
+        publishPanelInput();
+
+        // Joy-Con
+        if (BP32.update())
+        {
+            for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
+            {
+                if (connectedControllers[i] != nullptr)
+                {
+                    readControllerInput(connectedControllers[i]);
+                }
+            }
+        }
+    }
+
+    delay(10);
+}

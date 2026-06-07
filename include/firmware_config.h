@@ -39,3 +39,23 @@
 #ifndef CLAW_MOTOR_CONTROLLER_CLIENT_ID
 #define CLAW_MOTOR_CONTROLLER_CLIENT_ID "motor_controller"
 #endif
+
+// Hardware panel button GPIO pins — an tatsächliche Verdrahtung anpassen
+#ifndef CLAW_PANEL_PIN_UP
+#define CLAW_PANEL_PIN_UP      32
+#endif
+#ifndef CLAW_PANEL_PIN_DOWN
+#define CLAW_PANEL_PIN_DOWN    33
+#endif
+#ifndef CLAW_PANEL_PIN_LEFT
+#define CLAW_PANEL_PIN_LEFT    25
+#endif
+#ifndef CLAW_PANEL_PIN_RIGHT
+#define CLAW_PANEL_PIN_RIGHT   26
+#endif
+#ifndef CLAW_PANEL_PIN_GRAB
+#define CLAW_PANEL_PIN_GRAB    27
+#endif
+#ifndef CLAW_PANEL_PIN_RELEASE
+#define CLAW_PANEL_PIN_RELEASE 14
+#endif
