@@ -13,3 +13,4 @@ docker/mosquitto/data/mosquitto.db
 .claude/settings.local.json
 frontend/node_modules/
 frontend/dist/
+frontend/.angular/
