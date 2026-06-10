@@ -9,4 +9,9 @@ __pycache__/
 data/index.html
 data/style.css
 docker/mosquitto/data/mosquitto.db
+managed_components/
+components/
+data/deb_files/
+dependencies.lock
+sdkconfig.defaults
 
