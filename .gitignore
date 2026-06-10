@@ -11,3 +11,10 @@ data/style.css
 docker/mosquitto/data/mosquitto.db
 **/__pycache__/
 .claude/settings.local.json
+managed_components/
+components/
+data/deb_files/
+dependencies.lock
+sdkconfig.defaults
+
+**/__pycache__/
