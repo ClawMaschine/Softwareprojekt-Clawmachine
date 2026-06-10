@@ -3,6 +3,11 @@
 
 #include "claw_mqtt_connection.h"
 #include "firmware_config.h"
+#include "joy_con_input.h"
+#include "panel_input.h"
+
+static constexpr const char *JOYCON_TOPIC = "clawmachine/player_input/joycon";
+static constexpr const char *PANEL_TOPIC  = "clawmachine/player_input/panel";
 
 ClawMqttConnection playerInputConnection(
     CLAW_CLIENT_WIFI_SSID,
@@ -13,8 +18,12 @@ ClawMqttConnection playerInputConnection(
     CLAW_CONNECTION_RETRY_INTERVAL_MS);
 
 ControllerPtr connectedControllers[BP32_MAX_GAMEPADS];
+JoyConInput joyConInput;
+PanelInput  panelInput;
 
-static unsigned long lastControllerReadMs = 0;
+static unsigned long lastInputReadMs = 0;
+
+// ── Bluepad32 callbacks ──────────────────────────────────────────────────────
 
 void onConnectedController(ControllerPtr controller)
 {
@@ -23,7 +32,6 @@ void onConnectedController(ControllerPtr controller)
         if (connectedControllers[i] == nullptr)
         {
             connectedControllers[i] = controller;
-
             Serial.print("[BLUEPAD32] Controller connected at index ");
             Serial.println(i);
 
@@ -33,11 +41,9 @@ void onConnectedController(ControllerPtr controller)
                 properties.btaddr[0], properties.btaddr[1],
                 properties.btaddr[2], properties.btaddr[3],
                 properties.btaddr[4], properties.btaddr[5]);
-
             return;
         }
     }
-
     Serial.println("[BLUEPAD32] Controller connected, but no free slot available");
 }
 
@@ -110,18 +116,23 @@ void loop()
 {
     playerInputConnection.maintainConnection();
 
-    bool dataUpdated = BP32.update();
-    if (dataUpdated)
+    unsigned long now = millis();
+    if (now - lastInputReadMs >= 100)
     {
-        unsigned long now = millis();
-        if (now - lastControllerReadMs >= 100)
+        lastInputReadMs = now;
+
+        // Hardware Panel
+        panelInput.read();
+        publishPanelInput();
+
+        // Joy-Con
+        if (BP32.update())
         {
-            lastControllerReadMs = now;
             for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
             {
                 if (connectedControllers[i] != nullptr)
                 {
-                    readControllerInput(connectedControllers[i], i);
+                    readControllerInput(connectedControllers[i]);
                 }
             }
         }

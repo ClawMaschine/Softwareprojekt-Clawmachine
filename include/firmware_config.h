@@ -71,3 +71,23 @@
 #ifndef PRO_CONTROLER_MAC
 #define PRO_CONTROLER_MAC "E0:F6:B5:66:96:7E"
 #endif
+
+// Hardware panel button GPIO pins — an tatsächliche Verdrahtung anpassen
+#ifndef CLAW_PANEL_PIN_UP
+#define CLAW_PANEL_PIN_UP      32
+#endif
+#ifndef CLAW_PANEL_PIN_DOWN
+#define CLAW_PANEL_PIN_DOWN    33
+#endif
+#ifndef CLAW_PANEL_PIN_LEFT
+#define CLAW_PANEL_PIN_LEFT    25
+#endif
+#ifndef CLAW_PANEL_PIN_RIGHT
+#define CLAW_PANEL_PIN_RIGHT   26
+#endif
+#ifndef CLAW_PANEL_PIN_GRAB
+#define CLAW_PANEL_PIN_GRAB    27
+#endif
+#ifndef CLAW_PANEL_PIN_RELEASE
+#define CLAW_PANEL_PIN_RELEASE 14
+#endif

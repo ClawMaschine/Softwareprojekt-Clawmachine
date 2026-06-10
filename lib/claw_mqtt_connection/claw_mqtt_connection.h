@@ -18,10 +18,14 @@ public:
 
   void begin();
   void maintainConnection();
+  void setMessageCallback(void (*callback)(char *, uint8_t *, unsigned int));
+  void subscribe(const char *topic);
+  void publish(const char *topic, const char *payload);
 
 private:
   bool ensureWifiConnected();
   bool ensureMqttConnected();
+  void resubscribeAll();
 
   const char *wifiSsid;
   const char *wifiPassword;
@@ -35,4 +39,8 @@ private:
   unsigned long lastMqttConnectAttemptMilliseconds;
   WiFiClient networkClient;
   PubSubClient mqttClient;
+
+  static const uint8_t MAX_SUBSCRIPTIONS = 8;
+  String subscribedTopics[MAX_SUBSCRIPTIONS];
+  uint8_t subscribedTopicCount = 0;
 };

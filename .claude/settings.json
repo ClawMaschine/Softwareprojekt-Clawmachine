@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pio run*)",
+      "Bash(pio run -e *)",
+      "Bash(pio run -e * --target upload)",
+      "Bash(docker compose *)",
+      "Bash(python3 -m python_server*)",
+      "Bash(git status)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git branch*)",
+      "Bash(git show*)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(cat *)",
+      "Bash(ls *)"
+    ]
+  }
+}
