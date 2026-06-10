@@ -1,11 +1,11 @@
 #pragma once
 
 #ifndef CLAW_CLIENT_WIFI_SSID
-#define CLAW_CLIENT_WIFI_SSID "Vodafone-2A6F"
+#define CLAW_CLIENT_WIFI_SSID ""
 #endif
 
 #ifndef CLAW_CLIENT_WIFI_PASSWORD
-#define CLAW_CLIENT_WIFI_PASSWORD "GdGBcNnm3baAJmCh"
+#define CLAW_CLIENT_WIFI_PASSWORD ""
 #endif
 
 #ifndef CLAW_SERVER_TCP_PORT

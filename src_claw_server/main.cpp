@@ -23,9 +23,3 @@ void setup()
   Serial.println(CLAW_CONTROL_PANEL_CLIENT_ID);
   controlPanelConnection.begin();
 }
-
-void loop()
-{
-  controlPanelConnection.maintainConnection();
-  delay(20);
-}

@@ -15,3 +15,4 @@ data/deb_files/
 dependencies.lock
 sdkconfig.defaults
 
+**/__pycache__/
