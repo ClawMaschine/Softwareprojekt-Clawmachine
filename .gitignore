@@ -14,3 +14,10 @@ docker/mosquitto/data/mosquitto.db
 frontend/node_modules/
 frontend/dist/
 frontend/.angular/
+managed_components/
+components/
+data/deb_files/
+dependencies.lock
+sdkconfig.defaults
+
+**/__pycache__/
