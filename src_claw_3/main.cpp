@@ -20,7 +20,7 @@ void setup()
   Serial.println();
   Serial.println("[MOTOR_CONTROLLER] MQTT client starts");
   Serial.print("[MOTOR_CONTROLLER] Client ID: ");
-  Serial.println(xxx);
+  Serial.println(CLAW_MOTOR_CONTROLLER_CLIENT_ID);
   motorControllerConnection.begin();
 }
 
