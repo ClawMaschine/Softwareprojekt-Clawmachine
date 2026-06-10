@@ -1,0 +1,23 @@
+{
+  "name": "Clawmachine DevContainer",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "privileged": true,
+  "remoteUser": "vscode",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "platformio.platformio-ide",
+        "ms-vscode.cpptools"
+      ]
+    }
+  },
+  "mounts": [
+    "source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind", 
+    "source=/dev,target=/dev,type=bind",
+    "source=/run/udev,target=/run/udev,type=bind,readonly"
+  ],
+  "postCreateCommand": "pio pkg install",
+  "postStartCommand": "mkdir -p /home/vscode/.ssh && (ssh-keygen -F github.com -f /home/vscode/.ssh/known_hosts >/dev/null 2>&1 || ssh-keyscan github.com >> /home/vscode/.ssh/known_hosts 2>/dev/null) || true"
+}
