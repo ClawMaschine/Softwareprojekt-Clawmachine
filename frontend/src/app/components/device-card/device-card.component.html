@@ -1,0 +1,25 @@
+<div class="card" [class.online]="device.isOnline" [class.offline]="!device.isOnline">
+  <div class="card-header">
+    <span class="device-icon">{{ deviceIcon }}</span>
+    <span class="device-label">{{ device.label }}</span>
+    <span class="status-badge" [class.badge-online]="device.isOnline" [class.badge-offline]="!device.isOnline">
+      <span class="status-dot"></span>
+      {{ device.isOnline ? 'Online' : 'Offline' }}
+    </span>
+  </div>
+
+  <div class="card-body">
+    <div class="metric">
+      <span class="metric-label">Uptime</span>
+      <span class="metric-value">{{ uptimeFormatted }}</span>
+    </div>
+    <div class="metric">
+      <span class="metric-label">Zuletzt gesehen</span>
+      <span class="metric-value">{{ lastSeenFormatted }}</span>
+    </div>
+    <div class="metric">
+      <span class="metric-label">Device ID</span>
+      <span class="metric-value mono">{{ device.id }}</span>
+    </div>
+  </div>
+</div>

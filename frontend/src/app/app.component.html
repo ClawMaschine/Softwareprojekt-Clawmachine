@@ -1,0 +1,87 @@
+<div class="layout">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <span class="logo">🦾</span>
+      <div>
+        <h1 class="title">Clawmachine Dashboard</h1>
+        <p class="subtitle">{{ onlineCount }} / {{ devices.length }} Geräte online</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <span class="conn-status" [attr.data-status]="connectionStatus">
+        <span class="conn-dot"></span>
+        {{ statusLabel }}
+      </span>
+    </div>
+  </header>
+
+  <!-- Broker URL bar -->
+  <div class="broker-bar">
+    <label class="broker-label">Broker-URL</label>
+    <input
+      class="broker-input"
+      type="text"
+      [(ngModel)]="brokerUrl"
+      placeholder="ws://localhost:9001"
+      [disabled]="connectionStatus === 'connected' || connectionStatus === 'connecting'"
+    />
+    @if (connectionStatus === 'disconnected' || connectionStatus === 'error') {
+      <button class="btn btn-connect" (click)="onConnect()">Verbinden</button>
+    } @else {
+      <button class="btn btn-disconnect" (click)="onDisconnect()">Trennen</button>
+    }
+  </div>
+
+  <!-- Device Cards -->
+  <section class="section">
+    <h2 class="section-title">Geräte</h2>
+    <div class="device-grid">
+      @for (device of devices; track device.id) {
+        <app-device-card [device]="device" />
+      }
+    </div>
+  </section>
+
+  <!-- Logs -->
+  <div class="logs-grid">
+    <!-- Motor Commands -->
+    <section class="section">
+      <h2 class="section-title">Motor-Befehle <span class="topic-badge">motor_controller/command</span></h2>
+      <div class="log-panel">
+        @if (commandLog.length === 0) {
+          <p class="log-empty">Keine Befehle empfangen</p>
+        } @else {
+          @for (entry of commandLog; track entry.timestamp.getTime()) {
+            <div class="log-row">
+              <span class="log-time">{{ timeLabel(entry.timestamp) }}</span>
+              <span class="log-payload">{{ entry.payload }}</span>
+            </div>
+          }
+        }
+      </div>
+    </section>
+
+    <!-- Player Input -->
+    <section class="section">
+      <h2 class="section-title">Player Input <span class="topic-badge">player_input/joycon | panel</span></h2>
+      <div class="log-panel">
+        @if (inputLog.length === 0) {
+          <p class="log-empty">Kein Input empfangen</p>
+        } @else {
+          @for (entry of inputLog; track entry.timestamp.getTime()) {
+            <div class="log-row">
+              <span class="log-time">{{ timeLabel(entry.timestamp) }}</span>
+              <span class="log-source" [class.joycon]="entry.topic.includes('joycon')" [class.panel]="entry.topic.includes('panel')">
+                {{ entry.topic.includes('joycon') ? 'JC' : 'PNL' }}
+              </span>
+              <span class="log-payload">{{ entry.payload }}</span>
+            </div>
+          }
+        }
+      </div>
+    </section>
+  </div>
+
+</div>
