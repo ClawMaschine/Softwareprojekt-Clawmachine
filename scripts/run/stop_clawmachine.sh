@@ -2,7 +2,7 @@
 set -euo pipefail
 
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repository_root_directory="$(dirname "$script_directory")"
+repository_root_directory="$(cd "$script_directory/../.." && pwd)"
 
 cd "$repository_root_directory"
 
@@ -11,7 +11,7 @@ print_info() {
 }
 
 print_info "Suche Python-Server-Prozess..."
-python_server_pid=$(pgrep -f "python3 -m python_server.server" || true)
+python_server_pid=$(pgrep -f "python_server.server" || true)
 
 if [[ -n "$python_server_pid" ]]; then
     printf 'Beende Python-Server (PID: %s)...\n' "$python_server_pid"

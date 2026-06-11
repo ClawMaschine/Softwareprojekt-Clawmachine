@@ -19,5 +19,6 @@ components/
 data/deb_files/
 dependencies.lock
 sdkconfig.defaults
+config.local.ini
 
 **/__pycache__/
