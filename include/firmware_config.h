@@ -1,7 +1,7 @@
 #pragma once
 
 #ifndef CLAW_CLIENT_WIFI_SSID
-#define CLAW_CLIENT_WIFI_SSID ""
+#define CLAW_CLIENT_WIFI_SSID "praktikum"
 #endif
 
 #ifndef CLAW_CLIENT_WIFI_PASSWORD
@@ -17,7 +17,7 @@
 #endif
 
 #ifndef CLAW_MQTT_BROKER_HOST
-#define CLAW_MQTT_BROKER_HOST "192.168.0.103"
+#define CLAW_MQTT_BROKER_HOST "localhost"
 #endif
 
 #ifndef CLAW_MQTT_BROKER_PORT

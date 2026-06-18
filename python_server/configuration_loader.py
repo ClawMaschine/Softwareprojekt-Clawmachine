@@ -17,8 +17,9 @@ class MqttConfiguration:
 
 def load_mqtt_configuration() -> MqttConfiguration:
     config_parser = ConfigParser()
-    configuration_file_path = Path(__file__).with_name("config.ini")
-    config_parser.read(configuration_file_path)
+    project_root = Path(__file__).parent.parent
+    # config.local.ini überschreibt config.ini — lokal anlegen für abweichende Werte
+    config_parser.read([project_root / "config.ini", project_root / "config.local.ini"])
 
     broker = config_parser.get("mqtt", "broker", fallback="localhost")
     port = config_parser.getint("mqtt", "port", fallback=1883)

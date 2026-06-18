@@ -2,7 +2,7 @@
 set -euo pipefail
 
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repository_root_directory="$(dirname "$script_directory")"
+repository_root_directory="$(cd "$script_directory/../.." && pwd)"
 venv_directory_path="$repository_root_directory/.venv"
 docker_compose_file_path="$repository_root_directory/docker/docker-compose.yml"
 requirements_file_path="$repository_root_directory/python_server/requirements.txt"
@@ -18,12 +18,12 @@ print_error() {
 }
 
 if ! command -v docker >/dev/null 2>&1; then
-    print_error "docker ist nicht installiert. Bitte zuerst ./scripts/init_project.sh ausfuehren."
+    print_error "docker ist nicht installiert. Bitte zuerst ./scripts/setup/init_project.sh ausfuehren."
     exit 1
 fi
 
 if ! docker compose version >/dev/null 2>&1; then
-    print_error "docker compose ist nicht verfuegbar. Bitte zuerst ./scripts/init_project.sh ausfuehren."
+    print_error "docker compose ist nicht verfuegbar. Bitte zuerst ./scripts/setup/init_project.sh ausfuehren."
     exit 1
 fi
 
@@ -34,7 +34,7 @@ fi
 
 if [[ ! -f "$venv_directory_path/bin/activate" ]]; then
     print_error "Virtualenv nicht gefunden unter $venv_directory_path"
-    print_error "Bitte zuerst ./scripts/init_project.sh ausfuehren."
+    print_error "Bitte zuerst ./scripts/setup/init_project.sh ausfuehren."
     exit 1
 fi
 

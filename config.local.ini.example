@@ -1,0 +1,11 @@
+# Lokale Entwicklungskonfiguration — Vorlage
+#
+# Diese Datei nach config.local.ini kopieren und anpassen:
+#   cp config.local.ini.example config.local.ini
+#
+# config.local.ini wird von git ignoriert und überschreibt config.ini.
+# Nur Werte eintragen, die von config.ini abweichen.
+
+[mqtt]
+# Broker-Adresse des Servers im lokalen Netzwerk
+broker = 192.168.0.103

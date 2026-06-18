@@ -1,14 +1,88 @@
 # Softwarepraktikum-Clawmachine
 
-## Python server (lokal und spaeter Raspberry Pi)
+Steuerbarer Greifautomat auf Basis von ESP32-Boards, einem zentralen Python-Server und einem MQTT-Broker (Eclipse Mosquitto via Docker).
 
-Der Python-Server stellt bereit:
+---
 
-- TCP-Server fuer ESP32-Clients (Standard: Port `3333`)
-- HTTP-API und Dashboard (Standard: Port `8080`)
-- Multi-Client-Verwaltung mit Heartbeats
+## Schnellstart
 
-### Starten
+### Lokale Entwicklung (Entwicklungsrechner)
+
+```bash
+./scripts/setup/init_project.sh
+./scripts/run/start_project.sh
+```
+
+`init_project.sh` erkennt automatisch den Paketmanager (apt, pacman/Arch, brew) und richtet die Python-Virtualenv ein. Beim ersten Ausführen wird außerdem `config.local.ini` aus der Vorlage angelegt.
+
+### Server-Setup (Ubuntu x64)
+
+```bash
+./scripts/setup/setup_server.sh
+./scripts/run/start_project.sh
+```
+
+`setup_server.sh` installiert Docker, Python und alle Abhängigkeiten.
+
+---
+
+## Konfiguration
+
+Die Projektkonfiguration liegt in zwei Dateien im Projektroot:
+
+| Datei | Zweck | In git? |
+|---|---|---|
+| `config.ini` | Standardwerte für den Server-Betrieb | ja |
+| `config.local.ini` | Lokale Überschreibungen (z. B. Broker-IP) | nein (gitignored) |
+
+`config.local.ini` überschreibt `config.ini`. Es genügt, nur die abweichenden Werte einzutragen.
+
+### config.ini — Felder
+
+```ini
+[mqtt]
+broker = localhost           # Adresse des MQTT-Brokers
+                             # Server: localhost (Broker läuft lokal)
+                             # Lokal:  192.168.0.103 (Broker auf dem Server)
+port = 1883                  # MQTT-Port (Standard: 1883)
+username = clawmachine       # MQTT-Benutzername
+password = claw_secret       # MQTT-Passwort
+
+# Nur Python-Server
+topic = clawmachine/claw
+device_added_topic = clawmachine/device/added
+client_id = server
+connect_timeout_seconds = 5
+
+[wifi]
+# Nur ESP-Firmware (via generate_firmware_config.py)
+ssid = praktikum
+password =                   # WiFi-Passwort hier eintragen
+```
+
+### Lokale Entwicklung: config.local.ini anlegen
+
+```bash
+cp config.local.ini.example config.local.ini
+# broker-Zeile anpassen, z. B.:
+#   broker = 192.168.0.103
+```
+
+Die Datei wird von git ignoriert.
+
+### ESP-Firmware-Konfiguration generieren
+
+Geteilte Werte (MQTT-Broker-Adresse, WiFi-Zugangsdaten) werden aus `config.ini`/`config.local.ini` in `include/firmware_config.h` geschrieben:
+
+```bash
+python scripts/dev/generate_firmware_config.py
+# danach ESP bauen:
+pio run -e claw_motor_controller
+```
+
+---
+
+## Python-Server manuell starten
 
 ```bash
 python3 -m venv .venv
@@ -17,44 +91,36 @@ pip install -r python_server/requirements.txt
 python -m python_server
 ```
 
-Oder mit den neuen Skripten:
+---
+
+## MQTT-Broker (Docker)
 
 ```bash
-./scripts/init_project.sh
-./scripts/start_project.sh
+./scripts/run/start_mqtt_broker.sh    # starten
+./scripts/run/stop_mqtt_broker.sh     # stoppen
+./scripts/dev/mqtt_broker_logs.sh     # Logs anzeigen
+./scripts/dev/mqtt_message_logs.sh    # alle MQTT-Nachrichten mitschneiden
 ```
 
-Dann im Browser: `http://127.0.0.1:8080`
+---
 
-### Konfiguration per Umgebungsvariablen
-
-- `CLAW_TCP_HOST` (default: `0.0.0.0`)
-- `CLAW_TCP_PORT` (default: `3333`)
-- `CLAW_HTTP_HOST` (default: `0.0.0.0`)
-- `CLAW_HTTP_PORT` (default: `8080`)
-- `CLAW_HEARTBEAT_SECONDS` (default: `5`)
-- `CLAW_MAX_CLIENTS` (default: `8`)
-
-Beispiel:
+## ESP32-Firmware bauen
 
 ```bash
-CLAW_TCP_PORT=3333 CLAW_HTTP_PORT=8080 CLAW_MAX_CLIENTS=8 python -m python_server
+pio run -e claw_motor_controller   # Motor-Controller
+pio run -e claw_server             # Control Panel
+pio run -e claw_player_input       # Joy-Con Empfänger
 ```
 
-### MQTT-Konfiguration fuer den Python-Server
+Gemeinsame compile-time Konfiguration: `include/firmware_config.h`  
+Geteilte Werte aus `config.ini` generieren: `python scripts/dev/generate_firmware_config.py`
 
-Die MQTT-Verbindung wird in `python_server/config.ini` konfiguriert:
+---
 
-```ini
-[mqtt]
-broker = localhost
-port = 1883
-topic = clawmachine/claw
-client_id = server
-connect_timeout_seconds = 5
+## Emulator (ohne Hardware testen)
+
+```bash
+./scripts/dev/run_emulated_esp_once.sh
 ```
 
-### Firmware-Konfiguration fuer ESP32
-
-Gemeinsame compile-time Konfiguration liegt in `include/firmware_config.h`.
-Diese Werte werden beim Build in den C++-Code uebernommen und koennen dort zentral angepasst werden.
+Simuliert ein ESP-Gerät und sendet Uptime-Daten an den Broker.

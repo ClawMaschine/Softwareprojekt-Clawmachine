@@ -132,7 +132,9 @@ src_claw_player_input/      ← Firmware Joy-Con Bluetooth-Empfänger
 src_claw_server/            ← Firmware Control Panel
 python_server/              ← Zentrale Steuerlogik auf Raspberry Pi (FastAPI + MQTT)
 docker/                     ← Docker Compose für MQTT-Broker (Mosquitto)
-scripts/                    ← Hilfsskripte (MQTT-Broker starten/stoppen, Logs)
+scripts/setup/              ← Einmalige Einrichtung (init_project, setup_server, Python-Deps)
+scripts/run/                ← Tägliche Nutzung (start/stop Projekt und MQTT-Broker)
+scripts/dev/                ← Entwicklung/Debugging (Logs, ESP-Emulator, firmware_config generieren)
 ```
 
 ---
