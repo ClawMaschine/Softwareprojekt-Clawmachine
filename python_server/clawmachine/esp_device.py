@@ -1,18 +1,11 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
+
+# Hinweis: Die frühere `EspDevice`-Klasse wurde durch die ESP-Klassenhierarchie
+# in `esp.py` (abstrakte `Esp`-Oberklasse + Unterklassen) ersetzt. Hier verbleibt
+# nur noch das Metadaten-Wertobjekt, das `Esp` weiterverwendet.
 
 
 @dataclass
 class EspDeviceMetadata:
     uptime_milliseconds: Optional[int] = None
-
-
-@dataclass
-class EspDevice:
-    name: str
-    added_at_unix_seconds: Optional[float] = None
-    metadata: EspDeviceMetadata = field(default_factory=EspDeviceMetadata)
-    is_online: bool = False
-
-    def on_message(self, topic: str, payload: str):
-        print(f"[{self.name}] Internal message on {topic}: {payload}")
