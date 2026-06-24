@@ -105,17 +105,20 @@ def _is_enabled(service: str) -> bool:
     return _run(["systemctl", "is-enabled", "--quiet", service]).returncode == 0
 
 
+def _is_wireless(iface: str) -> bool:
+    p = Path(f"/sys/class/net/{iface}")
+    return (p / "wireless").is_dir() or (p / "phy80211").is_dir()
+
+
 def _get_wireless_interfaces() -> list[str]:
     result = _run(["iw", "dev"])
     if result.returncode == 0 and result.stdout.strip():
         found = re.findall(r"Interface (\S+)", result.stdout)
+        # iw dev sollte nur WLAN-Interfaces zurückgeben, aber sicherheitshalber filtern
+        found = [i for i in found if _is_wireless(i)]
         if found:
             return found
-    ifaces = []
-    for p in Path("/sys/class/net").iterdir():
-        if (p / "wireless").is_dir() or (p / "phy80211").is_dir():
-            ifaces.append(p.name)
-    return ifaces
+    return [p.name for p in Path("/sys/class/net").iterdir() if _is_wireless(p.name)]
 
 
 def _get_iface_mode(iface: str) -> str:
@@ -385,6 +388,11 @@ def _apply(iface: str, state: dict) -> None:
     console.print()
     console.print(Rule("[bold]Konfiguration wird angewendet[/]", style="cyan"))
     console.print()
+
+    # Sicherheitscheck: niemals lo oder Nicht-WLAN-Interfaces anfassen
+    if not _is_wireless(iface):
+        console.print(f"[red]✗ Sicherheitsabbruch: {iface!r} ist kein WLAN-Interface (z.B. lo).[/]")
+        sys.exit(1)
 
     # Pakete installieren
     packages = []
