@@ -1,0 +1,46 @@
+Jun 23 10:41:49 clawmachine systemd[1]: hostapd.service - Access point and authentication server for Wi-Fi and Ethernet skipped, unmet condition check ConditionFileNotEmpty=/etc/hostapd/hostapd.conf
+Jun 23 10:42:10 clawmachine systemd[1]: Starting dnsmasq.service - dnsmasq - A lightweight DHCP and caching DNS server...
+Jun 23 10:42:10 clawmachine systemd-helper[37311]: dnsmasq: failed to create listening socket for port 53: Address already in use
+Jun 23 10:42:10 clawmachine dnsmasq[37311]: failed to create listening socket for port 53: Address already in use
+Jun 23 10:42:10 clawmachine dnsmasq[37311]: FAILED to start up
+Jun 23 10:42:10 clawmachine systemd[1]: dnsmasq.service: Control process exited, code=exited, status=2/INVALIDARGUMENT
+Jun 23 10:42:10 clawmachine systemd[1]: dnsmasq.service: Failed with result 'exit-code'.
+Jun 23 10:42:10 clawmachine systemd[1]: Failed to start dnsmasq.service - dnsmasq - A lightweight DHCP and caching DNS server.
+Jun 24 14:09:07 clawmachine systemd[1]: hostapd.service - Access point and authentication server for Wi-Fi and Ethernet skipped, unmet condition check ConditionFileNotEmpty=/etc/hostapd/hostapd.conf
+Jun 24 14:09:09 clawmachine systemd[1]: Starting dnsmasq.service - dnsmasq - A lightweight DHCP and caching DNS server...
+Jun 24 14:09:09 clawmachine dnsmasq[43087]: started, version 2.92 cachesize 150
+Jun 24 14:09:09 clawmachine dnsmasq[43087]: compile time options: IPv6 GNU-getopt DBus no-UBus i18n IDN2 DHCP DHCPv6 no-Lua TFTP conntrack ipset nftset auth DNSSEC loop-detect inotify dumpfile
+Jun 24 14:09:09 clawmachine dnsmasq-dhcp[43087]: DHCP, IP range 192.168.0.100 -- 192.168.0.200, lease time 12h
+Jun 24 14:09:09 clawmachine dnsmasq-dhcp[43087]: DHCP, sockets bound exclusively to interface wlo1
+Jun 24 14:09:09 clawmachine dnsmasq[43087]: read /etc/hosts - 8 names
+Jun 24 14:09:09 clawmachine systemd[1]: Started dnsmasq.service - dnsmasq - A lightweight DHCP and caching DNS server.
+Jun 24 14:09:09 clawmachine resolvconf[43095]: Dropped protocol specifier '.dnsmasq' from 'lo.dnsmasq'. Using 'lo' (ifindex=1).
+Jun 24 14:09:09 clawmachine resolvconf[43095]: Failed to set DNS configuration: Link lo is loopback device.
+Jun 24 14:11:12 clawmachine systemd[1]: Stopping dnsmasq.service - dnsmasq - A lightweight DHCP and caching DNS server...
+Jun 24 14:11:12 clawmachine dnsmasq[43087]: exiting on receipt of SIGTERM
+Jun 24 14:11:12 clawmachine systemd[1]: dnsmasq.service: Deactivated successfully.
+Jun 24 14:11:12 clawmachine systemd[1]: Stopped dnsmasq.service - dnsmasq - A lightweight DHCP and caching DNS server.
+Jun 24 14:11:15 clawmachine systemd[1]: hostapd.service - Access point and authentication server for Wi-Fi and Ethernet skipped, unmet condition check ConditionFileNotEmpty=/etc/hostapd/hostapd.conf
+Jun 24 14:11:17 clawmachine systemd[1]: Starting dnsmasq.service - dnsmasq - A lightweight DHCP and caching DNS server...
+Jun 24 14:11:17 clawmachine dnsmasq[44061]: started, version 2.92 cachesize 150
+Jun 24 14:11:17 clawmachine dnsmasq[44061]: compile time options: IPv6 GNU-getopt DBus no-UBus i18n IDN2 DHCP DHCPv6 no-Lua TFTP conntrack ipset nftset auth DNSSEC loop-detect inotify dumpfile
+Jun 24 14:11:17 clawmachine dnsmasq-dhcp[44061]: DHCP, IP range 192.168.0.100 -- 192.168.0.200, lease time 12h
+Jun 24 14:11:17 clawmachine dnsmasq-dhcp[44061]: DHCP, sockets bound exclusively to interface wlo1
+Jun 24 14:11:17 clawmachine dnsmasq[44061]: read /etc/hosts - 8 names
+Jun 24 14:11:17 clawmachine systemd[1]: Started dnsmasq.service - dnsmasq - A lightweight DHCP and caching DNS server.
+Jun 24 14:11:17 clawmachine resolvconf[44069]: Dropped protocol specifier '.dnsmasq' from 'lo.dnsmasq'. Using 'lo' (ifindex=1).
+Jun 24 14:11:17 clawmachine resolvconf[44069]: Failed to set DNS configuration: Link lo is loopback device.
+Jun 24 14:18:14 clawmachine systemd[1]: Stopping dnsmasq.service - dnsmasq - A lightweight DHCP and caching DNS server...
+Jun 24 14:18:14 clawmachine dnsmasq[44061]: exiting on receipt of SIGTERM
+Jun 24 14:18:14 clawmachine systemd[1]: dnsmasq.service: Deactivated successfully.
+Jun 24 14:18:14 clawmachine systemd[1]: Stopped dnsmasq.service - dnsmasq - A lightweight DHCP and caching DNS server.
+Jun 24 14:18:18 clawmachine systemd[1]: hostapd.service - Access point and authentication server for Wi-Fi and Ethernet skipped, unmet condition check ConditionFileNotEmpty=/etc/hostapd/hostapd.conf
+Jun 24 14:18:19 clawmachine systemd[1]: Starting dnsmasq.service - dnsmasq - A lightweight DHCP and caching DNS server...
+Jun 24 14:18:19 clawmachine dnsmasq[45000]: started, version 2.92 cachesize 150
+Jun 24 14:18:19 clawmachine dnsmasq[45000]: compile time options: IPv6 GNU-getopt DBus no-UBus i18n IDN2 DHCP DHCPv6 no-Lua TFTP conntrack ipset nftset auth DNSSEC loop-detect inotify dumpfile
+Jun 24 14:18:19 clawmachine dnsmasq-dhcp[45000]: DHCP, IP range 192.168.0.100 -- 192.168.0.200, lease time 12h
+Jun 24 14:18:19 clawmachine dnsmasq-dhcp[45000]: DHCP, sockets bound exclusively to interface wlo1
+Jun 24 14:18:19 clawmachine dnsmasq[45000]: read /etc/hosts - 8 names
+Jun 24 14:18:19 clawmachine systemd[1]: Started dnsmasq.service - dnsmasq - A lightweight DHCP and caching DNS server.
+Jun 24 14:18:19 clawmachine resolvconf[45008]: Dropped protocol specifier '.dnsmasq' from 'lo.dnsmasq'. Using 'lo' (ifindex=1).
+Jun 24 14:18:19 clawmachine resolvconf[45008]: Failed to set DNS configuration: Link lo is loopback device.
