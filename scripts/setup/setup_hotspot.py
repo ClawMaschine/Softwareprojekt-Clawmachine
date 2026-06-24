@@ -75,7 +75,7 @@ _CONFIG_SOURCE = (
     else _CONFIG_INI.name
 )
 
-HOSTAPD_CONF = Path("/etc/hostapd/clawmachine-hotspot.conf")
+HOSTAPD_CONF = Path("/etc/hostapd/hostapd.conf")  # systemd-Unit prüft genau diesen Pfad (ConditionFileNotEmpty)
 DNSMASQ_CONF = Path("/etc/dnsmasq.d/clawmachine-hotspot.conf")
 NM_UNMANAGED_CONF = Path("/etc/NetworkManager/conf.d/99-clawmachine-unmanaged.conf")
 WLAN_IP_SERVICE = Path("/etc/systemd/system/clawmachine-wlan-ip.service")
@@ -340,6 +340,7 @@ def _write_dnsmasq_conf(iface: str) -> None:
     DNSMASQ_CONF.parent.mkdir(parents=True, exist_ok=True)
     DNSMASQ_CONF.write_text(
         f"interface={iface}\n"
+        f"except-interface=lo\n"  # verhindert resolvconf-Fehler "Link lo is loopback device"
         f"bind-interfaces\n"
         f"dhcp-range={DHCP_START},{DHCP_END},{DHCP_LEASE}\n"
         f"dhcp-option=option:router,{AP_IP}\n"
