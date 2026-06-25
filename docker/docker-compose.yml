@@ -28,8 +28,8 @@ services:
   # Frontend: Angular-App, erreichbar unter http://192.168.0.103
   frontend:
     build:
-      context: ../../frontend
-      dockerfile: ../docker/frontend/Dockerfile
+      context: ..          # Repo-Root (docker-compose liegt in docker/)
+      dockerfile: docker/frontend/Dockerfile
     container_name: clawmachine-frontend
     restart: unless-stopped
     ports:

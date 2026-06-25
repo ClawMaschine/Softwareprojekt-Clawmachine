@@ -123,7 +123,7 @@ def _show_header() -> None:
     console.print()
     console.print(Panel(
         "[bold cyan]Clawmachine[/] – Projekt starten\n"
-        "[dim]Startet MQTT-Broker (Docker) und Python-Server mit Live-Logs.[/dim]",
+        "[dim]Baut und startet Docker-Services (MQTT-Broker, CaptiveDNS, Frontend) und Python-Server.[/dim]",
         title="[bold]Start[/]",
         border_style="cyan",
     ))
@@ -174,21 +174,31 @@ def _check_prerequisites() -> bool:
 
 # ─── Start-Schritte ───────────────────────────────────────────────────────────
 
-def _start_broker() -> bool:
+def _start_docker_services() -> bool:
     console.print()
-    console.print(Rule("[bold]1 · MQTT-Broker (Docker)[/]", style="blue"))
+    console.print(Rule("[bold]1 · Docker Services (Build + Start)[/]", style="blue"))
 
-    ok = _stream(
+    # Images bauen (nur wenn Dockerfile/Quellcode geändert – cached sonst)
+    if not _stream(
+        ["docker", "compose", "-f", str(_COMPOSE), "build"],
+        "Images bauen (mqtt-broker, captive-dns, frontend)",
+    ):
+        return False
+
+    # Alle Services starten
+    if not _stream(
         ["docker", "compose", "-f", str(_COMPOSE), "up", "-d"],
-        "MQTT-Broker starten",
-    )
-    if ok:
-        services = _docker_compose_services()
-        for svc in services:
-            running = svc["status"].lower().startswith("up")
-            icon = "[green]●[/]" if running else "[yellow]○[/]"
-            console.print(f"  {icon} [bold]{svc['name']}[/]  [dim]{svc['ports']}[/dim]")
-    return ok
+        "Services starten",
+    ):
+        return False
+
+    # Statusübersicht
+    services = _docker_compose_services()
+    for svc in services:
+        running = svc["status"].lower().startswith("up")
+        icon = "[green]●[/]" if running else "[yellow]○[/]"
+        console.print(f"  {icon} [bold]{svc['name']}[/]  [dim]{svc['ports']}[/dim]")
+    return True
 
 
 def _stream_server() -> None:
@@ -231,9 +241,9 @@ def main() -> None:
         sys.exit(1)
     _show_state()
 
-    # Broker starten
-    if not _start_broker():
-        console.print("[red]✗ MQTT-Broker konnte nicht gestartet werden.[/]")
+    # Docker Services bauen + starten
+    if not _start_docker_services():
+        console.print("[red]✗ Docker Services konnten nicht gestartet werden.[/]")
         sys.exit(1)
 
     # Server mit Live-Logs
