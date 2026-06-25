@@ -10,8 +10,8 @@ ClawMqttConnection motorControllerConnection(
     CLAW_MQTT_BROKER_HOST,
     CLAW_MQTT_BROKER_PORT,
     CLAW_MOTOR_CONTROLLER_CLIENT_ID,
-    CLAW_MQTT_USERNAME,
-    CLAW_MQTT_PASSWORD,
+    CLAW_MQTT_BROKER_USERNAME,
+    CLAW_MQTT_BROKER_PASSWORD,
     CLAW_CONNECTION_RETRY_INTERVAL_MS);
 
 ClawMotorController movementController(motorControllerConnection);
