@@ -19,11 +19,8 @@ services:
       dockerfile: Dockerfile
     container_name: captive-dns
     restart: unless-stopped
-    # host-Netzwerk: bindet direkt ans Hotspot-Interface (wlo1 / 192.168.0.103:53)
-    # Kein Port-Mapping nötig — dnsmasq hat port=0, kein Konflikt
+    # host-Netzwerk: Container bindet direkt auf 192.168.0.103:53 (Hotspot-Interface)
     network_mode: host
-    environment:
-      - DNS_REDIRECT_IP=192.168.0.103
 
   # Frontend: Angular-App, erreichbar unter http://192.168.0.103
   frontend:
