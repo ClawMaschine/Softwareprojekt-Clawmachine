@@ -17,6 +17,18 @@
     </div>
   </header>
 
+  <!-- Verbindungsfehler -->
+  @if (connectionStatus === 'error') {
+    <div class="error-banner">
+      <span class="error-icon">⚠</span>
+      <div class="error-text">
+        <strong>Server nicht erreichbar</strong>
+        <span>Verbindung zu <code>{{ brokerUrl }}</code> fehlgeschlagen – läuft der MQTT-Broker? Nächster Versuch in 3 s …</span>
+      </div>
+      <button class="btn btn-connect error-retry" (click)="onConnect()">Jetzt versuchen</button>
+    </div>
+  }
+
   <!-- Broker URL bar -->
   <div class="broker-bar">
     <label class="broker-label">Broker-URL</label>

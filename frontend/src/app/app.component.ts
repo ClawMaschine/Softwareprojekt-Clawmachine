@@ -13,7 +13,7 @@ import { DeviceCardComponent } from './components/device-card/device-card.compon
   styleUrl: './app.component.css',
 })
 export class AppComponent implements OnInit, OnDestroy {
-  brokerUrl = 'ws://localhost:9001';
+  brokerUrl = `ws://${window.location.hostname}:8083`;
   connectionStatus: ConnectionStatus = 'disconnected';
   devices: DeviceState[] = [];
   commandLog: MessageLog[] = [];
