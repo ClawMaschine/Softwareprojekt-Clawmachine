@@ -342,6 +342,7 @@ def _write_dnsmasq_conf(iface: str) -> None:
         f"interface={iface}\n"
         f"except-interface=lo\n"  # verhindert resolvconf-Fehler "Link lo is loopback device"
         f"bind-interfaces\n"
+        f"port=0\n"  # DNS deaktivieren — CaptiveDNS (Docker) übernimmt Port 53
         f"dhcp-range={DHCP_START},{DHCP_END},{DHCP_LEASE}\n"
         f"dhcp-option=option:router,{AP_IP}\n"
         f"dhcp-option=option:dns-server,{AP_IP}\n"
