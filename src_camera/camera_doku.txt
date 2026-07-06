@@ -1,0 +1,17 @@
+Dokumentation Camera für den ESP32-CAM.
+
+Setup:
+Wlan ssid/passwort eintragen in unserem Raum/Clawmachine Wlan.
+
+Hinweis:
+Der ESP32-CAM sollte von unserem WLAN eine eigene neue IP bekommen. Unter dieser Addresse kann man (siehe Bedienung) empfangen.
+Der Build unter Platform-IO ist in dieser Version erfolgreich.
+
+Bedienung:
+unter "/stream" haben wir ein Live-Kamerabild mit ungefähr 20 fps wegen dem 50ms delay.
+unter "/capture" haben wir ein einzelnded JPEG Bild.
+unter "/data" sind bloße Kameradaten als JSON.
+
+
+
+
