@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Lokale Entwicklungsumgebung einrichten.
 # Für Server-Setup: scripts/setup/setup_server.sh
+
 set -euo pipefail
 
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -64,28 +65,31 @@ install_system_packages() {
 
     case "$pkg_manager" in
         apt)
+            run_as_root apt-get update
             run_as_root apt-get install -y "${packages[@]}"
             ;;
         pacman)
-            # Paketnamen für Arch/Manjaro anpassen
             local arch_packages=()
+
             for pkg in "${packages[@]}"; do
                 case "$pkg" in
-                    python3-pip|python3-venv) arch_packages+=("python") ;;
-                    mosquitto-clients)        arch_packages+=("mosquitto") ;;
-                    *)                        arch_packages+=("$pkg") ;;
+                    python3.10)       arch_packages+=("python") ;;
+                    python3.10-venv)  arch_packages+=("python") ;;
+                    mosquitto-clients) arch_packages+=("mosquitto") ;;
+                    *)                arch_packages+=("$pkg") ;;
                 esac
             done
-            # Deduplizieren
-            local unique_packages
-            mapfile -t unique_packages < <(printf '%s\n' "${arch_packages[@]}" | sort -u)
-            run_as_root pacman -S --needed --noconfirm "${unique_packages[@]}"
+
+            mapfile -t arch_packages < <(printf '%s\n' "${arch_packages[@]}" | sort -u)
+
+            run_as_root pacman -S --needed --noconfirm "${arch_packages[@]}"
             ;;
         brew)
             brew install "${packages[@]}"
             ;;
         none)
-            print_error "Kein bekannter Paketmanager gefunden. Bitte manuell installieren: ${packages[*]}"
+            print_error "Kein bekannter Paketmanager gefunden."
+            print_error "Bitte manuell installieren: ${packages[*]}"
             exit 1
             ;;
     esac
@@ -94,25 +98,25 @@ install_system_packages() {
 print_info "Lokale Entwicklungsumgebung einrichten"
 
 # Voraussetzungen prüfen
-has_python3=false
+has_python310=false
 has_venv_module=false
 pkg_manager="$(detect_package_manager)"
 missing_packages=()
 
-if command -v python3 >/dev/null 2>&1; then
-    has_python3=true
+if command -v python3.10 >/dev/null 2>&1; then
+    has_python310=true
 fi
 
-if $has_python3 && python3 -m venv --help >/dev/null 2>&1; then
+if $has_python310 && python3.10 -m venv --help >/dev/null 2>&1; then
     has_venv_module=true
 fi
 
-if ! $has_python3; then
-    missing_packages+=("python3")
+if ! $has_python310; then
+    missing_packages+=("python3.10")
 fi
 
 if ! $has_venv_module; then
-    missing_packages+=("python3-venv")
+    missing_packages+=("python3.10-venv")
 fi
 
 if [[ "${#missing_packages[@]}" -eq 0 ]]; then
@@ -132,9 +136,16 @@ if [[ "${#missing_packages[@]}" -gt 0 ]]; then
     install_system_packages "$pkg_manager" "${missing_packages[@]}"
 fi
 
+# Nach Installation erneut prüfen
+if ! command -v python3.10 >/dev/null 2>&1; then
+    print_error "Python 3.10 konnte nicht gefunden werden."
+    exit 1
+fi
+
 # Python-Abhängigkeiten installieren
 print_info "Installiere Python-Abhängigkeiten"
-"$script_directory/install_python_dependencies.sh"
+PYTHON_BIN=python3.10 \
+    "$script_directory/install_python_dependencies.sh"
 
 # Lokale Konfiguration anlegen
 local_config_path="$repository_root_directory/config.local.ini"
@@ -150,6 +161,7 @@ else
 fi
 
 print_info "Einrichtung abgeschlossen"
+
 printf '\nNächste Schritte:\n'
 printf '  1. config.local.ini prüfen (mqtt.broker = IP des Servers)\n'
 printf '  2. MQTT-Broker lokal starten (optional): ./scripts/run/start_mqtt_broker.sh\n'
