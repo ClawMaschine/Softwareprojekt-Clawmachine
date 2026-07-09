@@ -6,28 +6,27 @@ void JoyConInput::update(ControllerPtr controller)
         return;
     }
 
-    const uint16_t buttons = controller->buttons();
-    const uint8_t  dpad    = controller->dpad();
+    const uint8_t dpad = controller->dpad();
 
     up_button    = (dpad & DPAD_UP)    != 0;
     down_button  = (dpad & DPAD_DOWN)  != 0;
     left_button  = (dpad & DPAD_LEFT)  != 0;
     right_button = (dpad & DPAD_RIGHT) != 0;
 
-    a_button = (buttons & BUTTON_A) != 0;
-    b_button = (buttons & BUTTON_B) != 0;
-    x_button = (buttons & BUTTON_X) != 0;
-    y_button = (buttons & BUTTON_Y) != 0;
+    a_button = controller->a();
+    b_button = controller->b();
+    x_button = controller->x();
+    y_button = controller->y();
 
-    l1_button = (buttons & BUTTON_L1) != 0;
-    r1_button = (buttons & BUTTON_R1) != 0;
-    l2_button = (buttons & BUTTON_L2) != 0;
-    r2_button = (buttons & BUTTON_R2) != 0;
+    l1_button = controller->l1();
+    r1_button = controller->r1();
+    l2_button = controller->l2();
+    r2_button = controller->r2();
 
-    left_stick_button  = (buttons & BUTTON_THUMB_L) != 0;
-    right_stick_button = (buttons & BUTTON_THUMB_R) != 0;
+    left_stick_button  = controller->thumbL();
+    right_stick_button = controller->thumbR();
 
-    menu_button = (buttons & BUTTON_MENU) != 0;
+    menu_button = controller->miscStart();
 
     axis_x  = controller->axisX();
     axis_y  = controller->axisY();

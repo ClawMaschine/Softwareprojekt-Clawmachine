@@ -91,6 +91,90 @@ install_system_packages() {
     esac
 }
 
+
+
+install_bluepad32_components() {
+    local components_directory="$repository_root_directory/local_components"
+    local bluepad_template_url="https://github.com/ricardoquesada/esp-idf-arduino-bluepad32-template.git"
+    local temp_directory
+
+    print_info "Bluepad32-Komponenten prüfen"
+
+    mkdir -p "$components_directory"
+
+    if [[ -d "$components_directory/bluepad32" ]]; then
+        printf 'Bluepad32-Komponente bereits vorhanden: %s\n' "$components_directory/bluepad32"
+    else
+        print_info "Bluepad32-Komponenten herunterladen"
+
+        temp_directory="$(mktemp -d)"
+
+        git clone --recursive "$bluepad_template_url" "$temp_directory/bluepad32_template"
+
+        for component_name in bluepad32 bluepad32_arduino btstack arduino; do
+            if [[ -d "$components_directory/$component_name" ]]; then
+                printf 'Komponente bereits vorhanden: %s\n' "$component_name"
+                continue
+            fi
+
+            if [[ ! -d "$temp_directory/bluepad32_template/components/$component_name" ]]; then
+                print_error "Komponente im Template nicht gefunden: $component_name"
+                rm -rf "$temp_directory"
+                exit 1
+            fi
+
+            cp -r "$temp_directory/bluepad32_template/components/$component_name" "$components_directory/"
+            printf 'Komponente hinzugefügt: %s\n' "$component_name"
+        done
+
+        rm -rf "$temp_directory"
+    fi
+}
+
+install_esp_idf_console_components() {
+    local components_directory="$repository_root_directory/local_components"
+    local esp_idf_directory="${IDF_PATH:-$HOME/.platformio/packages/framework-espidf}"
+    local source_base_directory="$esp_idf_directory/examples/system/console/advanced/components"
+
+    print_info "ESP-IDF-Console-Komponenten prüfen"
+
+    mkdir -p "$components_directory"
+
+    for component_name in cmd_nvs cmd_system cmd_wifi; do
+        if [[ -d "$components_directory/$component_name" ]]; then
+            printf 'Komponente bereits vorhanden: %s\n' "$component_name"
+            continue
+        fi
+
+        if [[ ! -d "$source_base_directory/$component_name" ]]; then
+            print_warning "Komponente nicht gefunden: $source_base_directory/$component_name"
+            continue
+        fi
+
+        cp -r "$source_base_directory/$component_name" "$components_directory/"
+        printf 'Komponente hinzugefügt: %s\n' "$component_name"
+    done
+}
+
+patch_bluepad32_for_platformio() {
+    print_info "Bluepad32 PlatformIO-Kompatibilität prüfen"
+
+    local files_to_patch=(
+        "$repository_root_directory/local_components/bluepad32/platform/uni_platform_unijoysticle.c"
+        "$repository_root_directory/local_components/bluepad32_arduino/arduino_platform.c"
+    )
+
+    for file_path in "${files_to_patch[@]}"; do
+        if [[ ! -f "$file_path" ]]; then
+            print_warning "Bluepad32-Datei nicht gefunden: $file_path"
+            continue
+        fi
+
+        sed -i 's/[[:space:]]*cmd_system_version();/    \/\/ cmd_system_version();/' "$file_path"
+        printf 'Bluepad32 cmd_system_version-Patch angewendet: %s\n' "$file_path"
+    done
+}
+
 print_info "Lokale Entwicklungsumgebung einrichten"
 
 # Voraussetzungen prüfen
@@ -135,6 +219,17 @@ fi
 # Python-Abhängigkeiten installieren
 print_info "Installiere Python-Abhängigkeiten"
 "$script_directory/install_python_dependencies.sh"
+
+print_info "Fixiere kompatible Click-Version für PlatformIO/esptool"
+if command -v /usr/bin/python3 >/dev/null 2>&1; then
+    /usr/bin/python3 -m pip install --user --force-reinstall "click==8.1.8"
+else
+    python3 -m pip install --user --force-reinstall "click==8.1.8"
+fi
+
+install_bluepad32_components
+install_esp_idf_console_components
+patch_bluepad32_for_platformio
 
 # Lokale Konfiguration anlegen
 local_config_path="$repository_root_directory/config.local.ini"

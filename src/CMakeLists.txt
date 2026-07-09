@@ -21,8 +21,9 @@ file(GLOB pubsub_srcs
 idf_component_register(
     SRCS ${player_input_srcs} ${pubsub_srcs}
     INCLUDE_DIRS
-        "${CMAKE_CURRENT_SOURCE_DIR}/../include"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../lib/claw_mqtt_connection"
-        "${CMAKE_SOURCE_DIR}/.pio/libdeps/claw_player_input/PubSubClient/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../lib/claw_mqtt_connection"
+    "${CMAKE_SOURCE_DIR}/.pio/libdeps/claw_player_input/PubSubClient/src"
+    "${CMAKE_SOURCE_DIR}/.pio/libdeps/claw_player_input/ArduinoJson/src"
     REQUIRES "bluepad32" "bluepad32_arduino" "arduino" "btstack"
 )

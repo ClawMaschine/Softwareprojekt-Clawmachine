@@ -13,8 +13,10 @@ ClawMqttConnection playerInputConnection(
     CLAW_CLIENT_WIFI_SSID,
     CLAW_CLIENT_WIFI_PASSWORD,
     CLAW_MQTT_BROKER_HOST,
-    CLAW_MQTT_BROKER_PORT,
+    static_cast<uint16_t>(CLAW_MQTT_BROKER_PORT),
     CLAW_PLAYER_INPUT_CLIENT_ID,
+    CLAW_MQTT_USER_USERNAME,
+    CLAW_MQTT_USER_PASSWORD,
     CLAW_CONNECTION_RETRY_INTERVAL_MS);
 
 ControllerPtr connectedControllers[BP32_MAX_GAMEPADS];
@@ -123,7 +125,8 @@ void loop()
 
         // Hardware Panel
         panelInput.read();
-        publishPanelInput();
+        //publishPanelInput();
+
 
         // Joy-Con
         if (BP32.update())
@@ -132,7 +135,7 @@ void loop()
             {
                 if (connectedControllers[i] != nullptr)
                 {
-                    readControllerInput(connectedControllers[i]);
+                    readControllerInput(connectedControllers[i], i);
                 }
             }
         }
