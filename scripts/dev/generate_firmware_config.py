@@ -53,12 +53,17 @@ def main() -> None:
 
     mqtt_broker = config.get("mqtt", "broker", fallback="localhost")
     mqtt_port = config.getint("mqtt", "port", fallback=1883)
+    
+    mqtt_user = config.get("mqtt", "user", fallback="")
+    mqtt_password = config.get("mqtt", "password", fallback="")
     wifi_ssid = config.get("wifi", "ssid", fallback="")
     wifi_password = config.get("wifi", "password", fallback="")
 
     content = read_firmware_config()
     content = replace_define(content, "CLAW_MQTT_BROKER_HOST", quote(mqtt_broker))
     content = replace_define(content, "CLAW_MQTT_BROKER_PORT", str(mqtt_port))
+    content = replace_define(content, "CLAW_MQTT_USER_USERNAME", str(mqtt_user))
+    content = replace_define(content, "CLAW_MQTT_USER_USERNAME", str(mqtt_password))
     content = replace_define(content, "CLAW_CLIENT_WIFI_SSID", quote(wifi_ssid))
     content = replace_define(content, "CLAW_CLIENT_WIFI_PASSWORD", quote(wifi_password))
 

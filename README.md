@@ -15,7 +15,7 @@ python3 scripts/run/start_project.py
 
 `init_project.sh` erkennt automatisch den Paketmanager (apt, pacman/Arch, brew) und richtet die Python-Virtualenv ein. Beim ersten Ausführen wird außerdem `config.local.ini` aus der Vorlage angelegt.
 
-### Server-Setup (Raspberry Pi, als root)
+### Server-Setup (Ubuntu Server, als root)
 
 ```bash
 sudo python3 scripts/setup/setup_server.py
@@ -58,10 +58,10 @@ python3 scripts/run/start_project.py
 ╚══════════════════════════════════════════════════════════════════╝
 
   scripts/setup/init_project.sh
-  │   Erkennt Paketmanager (apt / pacman / brew)
-  │   Legt config.local.ini aus Vorlage an
+  │   - Erkennt Paketmanager (apt / pacman / brew)
+  │   - Legt config.local.ini aus Vorlage an
   └──► scripts/setup/install_python_dependencies.sh
-           Erstellt .venv, installiert requirements.txt
+           - Erstellt .venv, installiert requirements.txt
 
 
 ╔══════════════════════════════════════════════════════════════════╗
@@ -69,15 +69,15 @@ python3 scripts/run/start_project.py
 ╚══════════════════════════════════════════════════════════════════╝
 
   sudo python3 scripts/setup/setup_server.py        ← TUI ✦
-  │   Zeigt Systemzustand + geplante Schritte
+  │   - Zeigt Systemzustand + geplante Schritte
   ├── apt-get update / upgrade
   ├── Docker CE + Compose installieren
   ├── python3, pip, venv, mosquitto-clients
   ├── scripts/setup/install_python_dependencies.sh
   └── scripts/setup/setup_hotspot.py                ← TUI ✦
-          Erkennt WLAN-Interface (wlan0 / wlo1)
-          Liest SSID + Passwort aus config.ini
-          Konfiguriert hostapd + dnsmasq
+          - Erkennt WLAN-Interface (wlan0 / wlo1)
+          - Liest SSID + Passwort aus config.ini
+          - Konfiguriert hostapd + dnsmasq
 
 
 ╔══════════════════════════════════════════════════════════════════╗
@@ -91,7 +91,7 @@ python3 scripts/run/start_project.py
 
 
 ╔══════════════════════════════════════════════════════════════════╗
-║  TÄGLICH – Projekt starten (Raspberry Pi)                       ║
+║  Projekt starten (Ubuntu Server)                       ║
 ╚══════════════════════════════════════════════════════════════════╝
 
   python3 scripts/run/start_project.py               ← TUI ✦
@@ -103,7 +103,7 @@ python3 scripts/run/start_project.py
 
 
 ╔══════════════════════════════════════════════════════════════════╗
-║  TÄGLICH – Projekt stoppen                                       ║
+║  Projekt stoppen                                       ║
 ╚══════════════════════════════════════════════════════════════════╝
 
   scripts/run/stop_clawmachine.sh
@@ -124,6 +124,17 @@ python3 scripts/run/start_project.py
 > **✦ TUI-Scripts** zeigen vor der Ausführung den aktuellen Systemzustand,
 > die geplanten Änderungen und fragen nach Bestätigung.
 > Sie sind idempotent – mehrfach ausführbar.
+
+---
+
+## Topic-Struktur
+
+| TOPIC | retained | Beschreibung |
+| --- | --- | --- | 
+| `clawmachine/<device_id>/announce` | ja | beim Boot gesendet|
+| `clawmachine/<device_id>/status` | nein | online/offline (via LWT) |
+| `clawmachine/<device_id>/telemetry` | nein | laufende Daten (z.B. Motorposition) |
+| `clawmachine/<device_id>/cmd` | nein | Server → Controller (Befehle) |
 
 ---
 
