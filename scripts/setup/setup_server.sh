@@ -56,6 +56,14 @@ fi
 print_info "Installiere Python-Abhängigkeiten"
 "$script_directory/install_python_dependencies.sh"
 
+print_info "Richte WLAN-Hotspot ein (Access Point für ESP32-Boards)"
+run_as_root python3 "$script_directory/setup_hotspot.py"
+
+print_info "Setze berechtigungen für die Mosquitto-Konfigurationsdateien"
+run_as_root chmod 644 docker/mosquitto/config/passwords 
+run_as_root chmod 644 docker/mosquitto/config/mosquitto.conf 
+run_as_root chmod 755 docker/mosquitto/config
+
 print_info "Setup abgeschlossen"
 printf '\nNächste Schritte:\n'
 printf '  1. Neu anmelden (damit docker-Gruppe wirksam wird)\n'

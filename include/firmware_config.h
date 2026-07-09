@@ -1,11 +1,11 @@
 #pragma once
 
 #ifndef CLAW_CLIENT_WIFI_SSID
-#define CLAW_CLIENT_WIFI_SSID "praktikum"
+#define CLAW_CLIENT_WIFI_SSID "clawmachine_server"
 #endif
 
 #ifndef CLAW_CLIENT_WIFI_PASSWORD
-#define CLAW_CLIENT_WIFI_PASSWORD ""
+#define CLAW_CLIENT_WIFI_PASSWORD "claw_secret"
 #endif
 
 #ifndef CLAW_SERVER_TCP_PORT
@@ -17,11 +17,19 @@
 #endif
 
 #ifndef CLAW_MQTT_BROKER_HOST
-#define CLAW_MQTT_BROKER_HOST "localhost"
+#define CLAW_MQTT_BROKER_HOST "192.168.0.103"
 #endif
 
 #ifndef CLAW_MQTT_BROKER_PORT
 #define CLAW_MQTT_BROKER_PORT 1883
+#endif
+
+#ifndef CLAW_MQTT_USER_USERNAME
+#define CLAW_MQTT_USER_USERNAME "clawmachine"
+#endif
+
+#ifndef CLAW_MQTT_USER_PASSWORD
+#define CLAW_MQTT_USER_PASSWORD "clawmachine_secret"
 #endif
 
 #ifndef SWITCH_JOYCON_RIGHT_CLIENT_ID
