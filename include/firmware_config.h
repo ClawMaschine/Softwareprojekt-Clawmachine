@@ -17,7 +17,7 @@
 #endif
 
 #ifndef CLAW_MQTT_BROKER_HOST
-#define CLAW_MQTT_BROKER_HOST "192.168.0.103"
+#define CLAW_MQTT_BROKER_HOST "10.99.130.164"
 #endif
 
 #ifndef CLAW_MQTT_BROKER_PORT
@@ -25,7 +25,7 @@
 #endif
 
 #ifndef CLAW_MQTT_USER_USERNAME
-#define CLAW_MQTT_USER_USERNAME "clawmachine"
+#define CLAW_MQTT_USER_USERNAME 
 #endif
 
 #ifndef CLAW_MQTT_USER_PASSWORD

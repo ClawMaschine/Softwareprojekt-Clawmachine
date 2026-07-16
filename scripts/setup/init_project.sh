@@ -91,6 +91,179 @@ install_system_packages() {
     esac
 }
 
+python_version_is_supported_by_esptool() {
+    local python_executable="$1"
+
+    "$python_executable" -c '
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+' >/dev/null 2>&1
+}
+
+find_compatible_python() {
+    local candidate
+    local executable
+    local candidates=()
+
+    # Explizite Auswahl hat höchste Priorität.
+    if [[ -n "${PLATFORMIO_INSTALLER_PYTHON:-}" ]]; then
+        candidates+=("$PLATFORMIO_INSTALLER_PYTHON")
+    fi
+
+    # Aktive virtuelle Umgebung berücksichtigen.
+    if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+        candidates+=("$VIRTUAL_ENV/bin/python")
+        candidates+=("$VIRTUAL_ENV/bin/python3")
+    fi
+
+    # Versionierte Python-Befehle vor dem allgemeinen python3 prüfen.
+    candidates+=(
+        "python3.13"
+        "python3.12"
+        "python3.11"
+        "python3.10"
+        "python3"
+        "/usr/local/bin/python3.13"
+        "/usr/local/bin/python3.12"
+        "/usr/local/bin/python3.11"
+        "/usr/local/bin/python3.10"
+        "/usr/bin/python3.13"
+        "/usr/bin/python3.12"
+        "/usr/bin/python3.11"
+        "/usr/bin/python3.10"
+        "/usr/local/bin/python3"
+        "/usr/bin/python3"
+    )
+
+    for candidate in "${candidates[@]}"; do
+        if [[ "$candidate" == */* ]]; then
+            executable="$candidate"
+        else
+            executable="$(command -v "$candidate" 2>/dev/null || true)"
+        fi
+
+        if [[ -z "$executable" || ! -x "$executable" ]]; then
+            continue
+        fi
+
+        if python_version_is_supported_by_esptool "$executable"; then
+            printf '%s\n' "$executable"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+configure_platformio_python_environment() {
+    local platformio_directory="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}"
+    local platformio_environment_directory="$platformio_directory/penv"
+    local platformio_python="$platformio_environment_directory/bin/python"
+    local platformio_installer_url="https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py"
+    local platformio_installer_script
+    local current_python_version
+    local click_version
+    local system_python
+
+    print_info "PlatformIO-Python-Umgebung prüfen"
+
+    system_python="$(command -v python3)"
+
+   system_python="$(find_compatible_python || true)"
+
+    if [[ -z "$system_python" ]]; then
+        print_error "Keine Python-Version ab 3.10 gefunden."
+        print_error "Bitte Python 3.10 oder neuer installieren oder"
+        print_error "PLATFORMIO_INSTALLER_PYTHON explizit setzen."
+        exit 1
+    fi
+
+current_python_version="$("$system_python" --version 2>&1)"
+
+printf 'Verwende Python für PlatformIO: %s\n' "$system_python"
+printf 'Python-Version: %s\n' "$current_python_version"
+
+    if [[ -x "$platformio_python" ]]; then
+        current_python_version="$("$platformio_python" --version 2>&1)"
+
+        if python_version_is_supported_by_esptool "$platformio_python"; then
+            printf 'PlatformIO verwendet eine kompatible Python-Version: %s\n' \
+                "$current_python_version"
+        else
+            print_warning "PlatformIO verwendet eine zu alte Python-Version: $current_python_version"
+            print_warning "PlatformIO-Python-Umgebung wird neu erstellt."
+
+            rm -rf "$platformio_environment_directory"
+        fi
+    fi
+
+    if [[ ! -x "$platformio_python" ]]; then
+        print_info "PlatformIO-Python-Umgebung mit Python 3.10 oder neuer erstellen"
+
+        platformio_installer_script="$(mktemp)"
+
+        if ! "$system_python" - \
+            "$platformio_installer_url" \
+            "$platformio_installer_script" <<'PY'
+import pathlib
+import sys
+import urllib.request
+
+source_url = sys.argv[1]
+destination = pathlib.Path(sys.argv[2])
+
+with urllib.request.urlopen(source_url) as response:
+    destination.write_bytes(response.read())
+PY
+        then
+            rm -f "$platformio_installer_script"
+            print_error "PlatformIO-Installer konnte nicht heruntergeladen werden."
+            exit 1
+        fi
+
+        if ! "$system_python" "$platformio_installer_script"; then
+            rm -f "$platformio_installer_script"
+            print_error "PlatformIO-Python-Umgebung konnte nicht erstellt werden."
+            exit 1
+        fi
+
+        rm -f "$platformio_installer_script"
+    fi
+
+    if [[ ! -x "$platformio_python" ]]; then
+        print_error "PlatformIO-Python wurde nicht gefunden: $platformio_python"
+        exit 1
+    fi
+
+    if ! python_version_is_supported_by_esptool "$platformio_python"; then
+        current_python_version="$("$platformio_python" --version 2>&1)"
+
+        print_error "PlatformIO verwendet weiterhin eine inkompatible Python-Version:"
+        print_error "$current_python_version"
+        exit 1
+    fi
+
+    if ! "$platformio_python" -m pip --version >/dev/null 2>&1; then
+        print_info "pip in der PlatformIO-Umgebung installieren"
+        "$platformio_python" -m ensurepip --upgrade
+    fi
+
+    print_info "Kompatible Click-Version für PlatformIO/esptool installieren"
+
+    "$platformio_python" -m pip install \
+        --disable-pip-version-check \
+        --force-reinstall \
+        "click==8.1.8"
+
+    current_python_version="$("$platformio_python" --version 2>&1)"
+    click_version="$(
+        "$platformio_python" -c \
+            'import importlib.metadata; print(importlib.metadata.version("click"))'
+    )"
+
+    printf 'PlatformIO-Python: %s\n' "$current_python_version"
+    printf 'PlatformIO-Click:  %s\n' "$click_version"
+}
 
 
 install_bluepad32_components() {
@@ -220,16 +393,10 @@ fi
 print_info "Installiere Python-Abhängigkeiten"
 "$script_directory/install_python_dependencies.sh"
 
-print_info "Fixiere kompatible Click-Version für PlatformIO/esptool"
-if command -v /usr/bin/python3 >/dev/null 2>&1; then
-    /usr/bin/python3 -m pip install --user --force-reinstall "click==8.1.8"
-else
-    python3 -m pip install --user --force-reinstall "click==8.1.8"
-fi
-
 install_bluepad32_components
 install_esp_idf_console_components
 patch_bluepad32_for_platformio
+configure_platformio_python_environment
 
 # Lokale Konfiguration anlegen
 local_config_path="$repository_root_directory/config.local.ini"

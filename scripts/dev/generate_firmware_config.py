@@ -54,7 +54,7 @@ def main() -> None:
     mqtt_broker = config.get("mqtt", "broker", fallback="localhost")
     mqtt_port = config.getint("mqtt", "port", fallback=1883)
     
-    mqtt_user = config.get("mqtt", "user", fallback="")
+    mqtt_user = config.get("mqtt", "username", fallback="")
     mqtt_password = config.get("mqtt", "password", fallback="")
     wifi_ssid = config.get("wifi", "ssid", fallback="")
     wifi_password = config.get("wifi", "password", fallback="")
