@@ -63,7 +63,7 @@ def main() -> None:
     content = replace_define(content, "CLAW_MQTT_BROKER_HOST", quote(mqtt_broker))
     content = replace_define(content, "CLAW_MQTT_BROKER_PORT", str(mqtt_port))
     content = replace_define(content, "CLAW_MQTT_USER_USERNAME", str(mqtt_user))
-    content = replace_define(content, "CLAW_MQTT_USER_USERNAME", str(mqtt_password))
+    content = replace_define(content, "CLAW_MQTT_USER_PASSWORD", str(mqtt_password))
     content = replace_define(content, "CLAW_CLIENT_WIFI_SSID", quote(wifi_ssid))
     content = replace_define(content, "CLAW_CLIENT_WIFI_PASSWORD", quote(wifi_password))
 

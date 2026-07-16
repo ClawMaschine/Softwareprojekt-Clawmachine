@@ -25,11 +25,11 @@
 #endif
 
 #ifndef CLAW_MQTT_USER_USERNAME
-#define CLAW_MQTT_USER_USERNAME 
+#define CLAW_MQTT_USER_USERNAME clawmachine
 #endif
 
 #ifndef CLAW_MQTT_USER_PASSWORD
-#define CLAW_MQTT_USER_PASSWORD "clawmachine_secret"
+#define CLAW_MQTT_USER_PASSWORD clawmachine_secret
 #endif
 
 #ifndef SWITCH_JOYCON_RIGHT_CLIENT_ID

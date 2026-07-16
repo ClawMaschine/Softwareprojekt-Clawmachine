@@ -264,6 +264,31 @@ PY
     printf 'PlatformIO-Python: %s\n' "$current_python_version"
     printf 'PlatformIO-Click:  %s\n' "$click_version"
 }
+install_platformio_project_dependencies() {
+    local platformio_directory="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}"
+    local platformio_executable="$platformio_directory/penv/bin/pio"
+    local arduinojson_directory="$repository_root_directory/.pio/libdeps/claw_player_input/ArduinoJson/src"
+
+    print_info "PlatformIO-Projektabhängigkeiten installieren"
+
+    if [[ ! -x "$platformio_executable" ]]; then
+        print_error "PlatformIO wurde nicht gefunden: $platformio_executable"
+        exit 1
+    fi
+
+    "$platformio_executable" pkg install \
+        --project-dir "$repository_root_directory" \
+        --environment claw_player_input
+
+    if [[ ! -d "$arduinojson_directory" ]]; then
+        print_error "ArduinoJson wurde nicht korrekt installiert:"
+        print_error "$arduinojson_directory"
+        print_error "Bitte den lib_deps-Eintrag in platformio.ini prüfen."
+        exit 1
+    fi
+
+    printf 'ArduinoJson vorhanden: %s\n' "$arduinojson_directory"
+}
 
 
 install_bluepad32_components() {
@@ -393,10 +418,13 @@ fi
 print_info "Installiere Python-Abhängigkeiten"
 "$script_directory/install_python_dependencies.sh"
 
+
+configure_platformio_python_environment
+install_platformio_project_dependencies
+
 install_bluepad32_components
 install_esp_idf_console_components
 patch_bluepad32_for_platformio
-configure_platformio_python_environment
 
 # Lokale Konfiguration anlegen
 local_config_path="$repository_root_directory/config.local.ini"
