@@ -9,11 +9,11 @@
 static constexpr const char *JOYCON_TOPIC = "clawmachine/player_input/joycon";
 static constexpr const char *PANEL_TOPIC  = "clawmachine/player_input/panel";
 
-ClawMqttConnection playerInputConnection(
+ClawMqttConnection mqttConnection(
     CLAW_CLIENT_WIFI_SSID,
     CLAW_CLIENT_WIFI_PASSWORD,
     CLAW_MQTT_BROKER_HOST,
-    static_cast<uint16_t>(CLAW_MQTT_BROKER_PORT),
+    CLAW_MQTT_BROKER_PORT,
     CLAW_PLAYER_INPUT_CLIENT_ID,
     CLAW_MQTT_USER_USERNAME,
     CLAW_MQTT_USER_PASSWORD,
@@ -66,24 +66,49 @@ void onDisconnectedController(ControllerPtr controller)
     Serial.println("[BLUEPAD32] Disconnected controller was not found");
 }
 
-void readControllerInput(ControllerPtr controller, int index)
+void printControllerStatus(ControllerPtr controller, int index)
 {
-    if (!controller->isConnected() || !controller->hasData())
-    {
-        return;
-    }
-
     Serial.print("[JOYCON ");
     Serial.print(index);
     Serial.print("] ");
-    Serial.print("axisX=");      Serial.print(controller->axisX());
-    Serial.print(" axisY=");     Serial.print(controller->axisY());
-    Serial.print(" axisRX=");    Serial.print(controller->axisRX());
-    Serial.print(" axisRY=");    Serial.print(controller->axisRY());
-    Serial.print(" buttons=0x"); Serial.print(controller->buttons(), HEX);
-    Serial.print(" dpad=0x");    Serial.println(controller->dpad(), HEX);
 
-    // TODO: Controller-Input per MQTT publizieren
+    if (controller == nullptr)
+    {
+        Serial.println("status=disconnected");
+        return;
+    }
+
+    if (!controller->isConnected())
+    {
+        Serial.println("status=disconnected");
+        return;
+    }
+
+    Serial.print("status=connected");
+
+    Serial.print(" axisX=");
+    Serial.print(controller->axisX());
+
+    Serial.print(" axisY=");
+    Serial.print(controller->axisY());
+
+    Serial.print(" axisRX=");
+    Serial.print(controller->axisRX());
+
+    Serial.print(" axisRY=");
+    Serial.print(controller->axisRY());
+
+    Serial.print(" brake=");
+    Serial.print(controller->brake());
+
+    Serial.print(" throttle=");
+    Serial.print(controller->throttle());
+
+    Serial.print(" buttons=0x");
+    Serial.print(controller->buttons(), HEX);
+
+    Serial.print(" dpad=0x");
+    Serial.println(controller->dpad(), HEX);
 }
 
 void setup()
@@ -94,7 +119,7 @@ void setup()
     Serial.println("[PLAYER_INPUT] MQTT client starts");
     Serial.print("[PLAYER_INPUT] Client ID: ");
     Serial.println(CLAW_PLAYER_INPUT_CLIENT_ID);
-    playerInputConnection.begin();
+    mqttConnection.begin();
 
     Serial.println("[BLUEPAD32] Starting...");
 
@@ -105,10 +130,16 @@ void setup()
         if (i > 0) Serial.print(":");
         Serial.printf("%02X", address[i]);
     }
-    Serial.println();
+    Serial.println("[BLUEPAD32] Starting...");
 
-    BP32.setup(&onConnectedController, &onDisconnectedController);
-    BP32.forgetBluetoothKeys();
+    BP32.setup(
+        &onConnectedController,
+        &onDisconnectedController
+    );
+
+    // Nur bei einem gewünschten vollständigen Pairing-Reset:
+    // BP32.forgetBluetoothKeys();
+
     BP32.enableVirtualDevice(false);
 
     Serial.println("[BLUEPAD32] Ready. Put Joy-Con into pairing mode.");
@@ -116,30 +147,43 @@ void setup()
 
 void loop()
 {
-    playerInputConnection.maintainConnection();
+    mqttConnection.maintainConnection();
 
-    unsigned long now = millis();
+    BP32.update();
+
+    const unsigned long now = millis();
+
     if (now - lastInputReadMs >= 100)
     {
         lastInputReadMs = now;
-
-        // Hardware Panel
         panelInput.read();
-        //publishPanelInput();
+    }
 
+    static unsigned long lastControllerStatusMs = 0;
 
-        // Joy-Con
-        if (BP32.update())
+    if (now - lastControllerStatusMs >= 1000)
+    {
+        lastControllerStatusMs = now;
+
+        bool controllerFound = false;
+
+        for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
         {
-            for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
+            if (connectedControllers[i] != nullptr)
             {
-                if (connectedControllers[i] != nullptr)
-                {
-                    readControllerInput(connectedControllers[i], i);
-                }
+                controllerFound = true;
+                printControllerStatus(connectedControllers[i], i);
             }
+        }
+
+        if (!controllerFound)
+        {
+            Serial.println(
+                "[JOYCON] disconnected "
+                "Waiting for controller..."
+            );
         }
     }
 
-    delay(10);
+    delay(1);
 }

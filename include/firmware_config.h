@@ -17,7 +17,7 @@
 #endif
 
 #ifndef CLAW_MQTT_BROKER_HOST
-#define CLAW_MQTT_BROKER_HOST "10.99.130.164"
+#define CLAW_MQTT_BROKER_HOST "192.168.0.103"
 #endif
 
 #ifndef CLAW_MQTT_BROKER_PORT
@@ -25,11 +25,11 @@
 #endif
 
 #ifndef CLAW_MQTT_USER_USERNAME
-#define CLAW_MQTT_USER_USERNAME clawmachine
+#define CLAW_MQTT_USER_USERNAME "clawmachine"
 #endif
 
 #ifndef CLAW_MQTT_USER_PASSWORD
-#define CLAW_MQTT_USER_PASSWORD clawmachine_secret
+#define CLAW_MQTT_USER_PASSWORD "clawmachine_secret"
 #endif
 
 #ifndef SWITCH_JOYCON_RIGHT_CLIENT_ID

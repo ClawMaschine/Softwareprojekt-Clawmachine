@@ -62,8 +62,8 @@ def main() -> None:
     content = read_firmware_config()
     content = replace_define(content, "CLAW_MQTT_BROKER_HOST", quote(mqtt_broker))
     content = replace_define(content, "CLAW_MQTT_BROKER_PORT", str(mqtt_port))
-    content = replace_define(content, "CLAW_MQTT_USER_USERNAME", str(mqtt_user))
-    content = replace_define(content, "CLAW_MQTT_USER_PASSWORD", str(mqtt_password))
+    content = replace_define(content, "CLAW_MQTT_USER_USERNAME", quote(mqtt_user))
+    content = replace_define(content, "CLAW_MQTT_USER_PASSWORD", quote(mqtt_password))
     content = replace_define(content, "CLAW_CLIENT_WIFI_SSID", quote(wifi_ssid))
     content = replace_define(content, "CLAW_CLIENT_WIFI_PASSWORD", quote(wifi_password))
 
