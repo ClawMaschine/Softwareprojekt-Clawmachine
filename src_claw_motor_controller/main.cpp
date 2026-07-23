@@ -3,8 +3,6 @@
 #include "claw_mqtt_connection.h"
 #include "claw_motor_controller.h"
 #include "firmware_config.h"
-#include <Servo.h>
-#include <Adafruit_MotorShield.h>
 
 ClawMqttConnection motorControllerConnection(
     CLAW_CLIENT_WIFI_SSID,
@@ -16,10 +14,12 @@ ClawMqttConnection motorControllerConnection(
     CLAW_MQTT_USER_PASSWORD,
     CLAW_CONNECTION_RETRY_INTERVAL_MS);
 
-
-
-
-ClawMotorController movementController(motorControllerConnection);
+ClawMotorController movementController(
+    motorControllerConnection,
+    CLAW_MOTOR_SHIELD_A_I2C_ADDRESS,
+    CLAW_MOTOR_SHIELD_B_I2C_ADDRESS,
+    CLAW_MOTOR_MAX_REVOLUTIONS_PER_MINUTE,
+    CLAW_CLAW_SERVO_PIN);
 
 void setup()
 {
@@ -36,5 +36,6 @@ void setup()
 void loop()
 {
   motorControllerConnection.maintainConnection();
+  movementController.update();
   delay(20);
 }
