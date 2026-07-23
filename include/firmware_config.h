@@ -21,7 +21,7 @@
 #endif
 
 #ifndef CLAW_MQTT_BROKER_PORT
-#define CLAW_MQTT_BROKER_PORT 1883
+#define CLAW_MQTT_BROKER_PORT 1885
 #endif
 
 #ifndef CLAW_MQTT_USER_USERNAME
@@ -98,4 +98,18 @@
 #endif
 #ifndef CLAW_PANEL_PIN_RELEASE
 #define CLAW_PANEL_PIN_RELEASE 14
+#endif
+
+// Motor-Shield-Verdrahtung — an tatsächliche Verdrahtung anpassen
+#ifndef CLAW_MOTOR_SHIELD_A_I2C_ADDRESS
+#define CLAW_MOTOR_SHIELD_A_I2C_ADDRESS 0x60
+#endif
+#ifndef CLAW_MOTOR_SHIELD_B_I2C_ADDRESS
+#define CLAW_MOTOR_SHIELD_B_I2C_ADDRESS 0x61
+#endif
+#ifndef CLAW_MOTOR_MAX_REVOLUTIONS_PER_MINUTE
+#define CLAW_MOTOR_MAX_REVOLUTIONS_PER_MINUTE 60
+#endif
+#ifndef CLAW_CLAW_SERVO_PIN
+#define CLAW_CLAW_SERVO_PIN 13
 #endif
