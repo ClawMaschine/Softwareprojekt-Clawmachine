@@ -8,9 +8,23 @@ fi
 
 mqtt_username="$1"
 
+script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repository_root_directory="$(cd "$script_directory/../.." && pwd)"
+compose_file_path="$repository_root_directory/docker/docker-compose.yml"
+
 if ! docker ps --format '{{.Names}}' | grep -qx "mqtt-broker"; then
-  echo "Fehler: Container 'mqtt-broker' läuft nicht. Erst mit scripts/run/start_project.py starten." >&2
-  exit 1
+  echo "Container 'mqtt-broker' läuft nicht – starte ihn..."
+  docker compose -f "$compose_file_path" up -d mqtt-broker
+
+  for _ in $(seq 1 10); do
+    docker ps --format '{{.Names}}' | grep -qx "mqtt-broker" && break
+    sleep 0.5
+  done
+
+  if ! docker ps --format '{{.Names}}' | grep -qx "mqtt-broker"; then
+    echo "Fehler: Container 'mqtt-broker' konnte nicht gestartet werden." >&2
+    exit 1
+  fi
 fi
 
 docker exec -it mqtt-broker mosquitto_passwd /mosquitto/config/passwords "$mqtt_username"
