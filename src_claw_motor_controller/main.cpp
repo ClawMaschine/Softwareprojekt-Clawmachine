@@ -36,7 +36,7 @@ void setup()
   movementController.begin();
   motorControllerConnection.setMessageCallback(onMqttMessage);
   motorControllerConnection.begin();
-  motorControllerConnection.subscribe("clawmachine/motor_controller/command");
+  motorControllerConnection.subscribe("clawmachine/motor_controller/motor/command");
 }
 
 void loop()
@@ -62,15 +62,15 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
   Serial.println(message);
 
   if (strcmp(topic, "clawmachine/motor_controller/motor/command") == 0) {
-    if (message.startsWith("x:")) {
+    if (message.startsWith("X:")) {
       int speed = message.substring(2).toInt();
-      movementController.move('x', speed);
-    } else if (message.startsWith("y:")) {
+      movementController.move('X', speed);
+    } else if (message.startsWith("Y:")) {
       int speed = message.substring(2).toInt();
-      movementController.move('y', speed);
-    } else if (message.startsWith("z:")) {
+      movementController.move('Y', speed);
+    } else if (message.startsWith("Z:")) {
       int speed = message.substring(2).toInt();
-      movementController.move('z', speed);
+      movementController.move('Z', speed);
     } else if (message.startsWith("claw:")) {
       String command = message.substring(5);
       movementController.moveClaw(command.c_str());
