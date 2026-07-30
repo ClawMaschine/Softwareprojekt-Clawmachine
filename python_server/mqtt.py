@@ -17,6 +17,7 @@ class MQTTClient:
         self.username = username
         self.password = password
         self.broker = broker
+        print(f"MQTT broker: {self.broker}")
         self.port = int(port)
         self.connect_timeout_seconds = float(connect_timeout_seconds)
         self.client = None

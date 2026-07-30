@@ -47,7 +47,7 @@ class ClawMachine:
         )
         self.mqtt_client = MQTTClient(
             client_id=mqtt_configuration.client_id,
-            broker=mqtt_configuration.broker,
+            broker="mqtt-broker",
             port=mqtt_configuration.port,
             connect_timeout_seconds=mqtt_configuration.connect_timeout_seconds,
             username=mqtt_configuration.username,
