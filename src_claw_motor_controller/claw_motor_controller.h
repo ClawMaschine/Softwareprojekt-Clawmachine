@@ -31,6 +31,8 @@ private:
   static ClawMotorController *instance;
   ClawMqttConnection &connection;
 
+  uint8_t motorShieldAI2cAddress;
+  uint8_t motorShieldBI2cAddress;
   Adafruit_MotorShield motorShieldA;
   Adafruit_MotorShield motorShieldB;
 

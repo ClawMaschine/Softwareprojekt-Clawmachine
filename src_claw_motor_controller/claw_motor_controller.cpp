@@ -9,12 +9,14 @@ ClawMotorController::ClawMotorController(
     uint16_t maxRevolutionsPerMinute,
     uint8_t clawServoPin)
     : connection(connection),
+      motorShieldAI2cAddress(motorShieldAI2cAddress),
+      motorShieldBI2cAddress(motorShieldBI2cAddress),
       motorShieldA(motorShieldAI2cAddress),
       motorShieldB(motorShieldBI2cAddress),
-      xMotorLeft(motorShieldA, 1, maxRevolutionsPerMinute),
-      yMotor(motorShieldA, 2, maxRevolutionsPerMinute),
-      xMotorRight(motorShieldB, 1, maxRevolutionsPerMinute),
-      zMotor(motorShieldB, 2, maxRevolutionsPerMinute),
+      xMotorLeft(motorShieldB, 1, maxRevolutionsPerMinute),
+      yMotor(motorShieldA, 1, maxRevolutionsPerMinute),
+      xMotorRight(motorShieldB, 2, maxRevolutionsPerMinute),
+      zMotor(motorShieldA, 2, maxRevolutionsPerMinute),
       clawServo(clawServoPin)
 {
   instance = this;
@@ -22,8 +24,12 @@ ClawMotorController::ClawMotorController(
 
 void ClawMotorController::begin()
 {
-  motorShieldA.begin();
-  motorShieldB.begin();
+  if (!motorShieldA.begin()) {
+    Serial.printf("[MOTOR] FEHLER: Motor Shield A (I2C 0x%02X) antwortet nicht!\n", motorShieldAI2cAddress);
+  }
+  if (!motorShieldB.begin()) {
+    Serial.printf("[MOTOR] FEHLER: Motor Shield B (I2C 0x%02X) antwortet nicht!\n", motorShieldBI2cAddress);
+  }
 
   xMotorLeft.begin();
   yMotor.begin();
@@ -48,8 +54,10 @@ void ClawMotorController::move(char axis, int speed)
   switch (axis) {
     case 'X':
       currentX = speed;
+      // xMotorLeft und xMotorRight sind gegensinnig montiert (siehe altes Referenzprogramm) —
+      // ohne Spiegelung wuerden sie gegeneinander statt gemeinsam fahren.
       xMotorLeft.setSpeed(speed);
-      xMotorRight.setSpeed(speed);
+      xMotorRight.setSpeed(-speed);
       Serial.printf("[MOTOR] X: %d\n", speed);
       break;
     case 'Y':
