@@ -11,6 +11,8 @@ services:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
+    networks:
+      - clawmachine_network
 
   # DNS: leitet alle Anfragen auf 192.168.0.103 um → Clients landen im Frontend
   captive-dns:
