@@ -152,6 +152,5 @@ fi
 print_info "Einrichtung abgeschlossen"
 printf '\nNächste Schritte:\n'
 printf '  1. config.local.ini prüfen (mqtt.broker = IP des Servers)\n'
-printf '  2. MQTT-Broker lokal starten (optional): ./scripts/run/start_mqtt_broker.sh\n'
-printf '  3. Server starten: ./scripts/run/start_project.sh\n'
+printf '  2. Projekt starten: python3 scripts/run/start_project.py\n'
 printf '\nFür Server-Setup: ./scripts/setup/setup_server.sh\n'

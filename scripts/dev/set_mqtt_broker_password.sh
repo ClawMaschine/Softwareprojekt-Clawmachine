@@ -9,7 +9,7 @@ fi
 mqtt_username="$1"
 
 if ! docker ps --format '{{.Names}}' | grep -qx "mqtt-broker"; then
-  echo "Fehler: Container 'mqtt-broker' läuft nicht. Erst mit scripts/run/start_mqtt_broker.sh starten." >&2
+  echo "Fehler: Container 'mqtt-broker' läuft nicht. Erst mit scripts/run/start_project.py starten." >&2
   exit 1
 fi
 
