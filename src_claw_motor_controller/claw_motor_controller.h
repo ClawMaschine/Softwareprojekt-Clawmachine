@@ -21,12 +21,12 @@ public:
   void begin();
   void update();
 
-private:
-  static void onMqttMessage(char *topic, uint8_t *payload, unsigned int length);
-
   void move(char axis, int speed);
   void moveZ(int speed);
   void moveClaw(const char *command);
+
+private:
+
 
   static ClawMotorController *instance;
   ClawMqttConnection &connection;
