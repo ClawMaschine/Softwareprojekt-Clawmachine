@@ -46,13 +46,13 @@ void ClawMotorController::update()
 void ClawMotorController::move(char axis, int speed)
 {
   switch (axis) {
-    case 'x':
+    case 'X':
       currentX = speed;
       xMotorLeft.setSpeed(speed);
       xMotorRight.setSpeed(speed);
       Serial.printf("[MOTOR] X: %d\n", speed);
       break;
-    case 'y':
+    case 'Y':
       currentY = speed;
       yMotor.setSpeed(speed);
       Serial.printf("[MOTOR] Y: %d\n", speed);

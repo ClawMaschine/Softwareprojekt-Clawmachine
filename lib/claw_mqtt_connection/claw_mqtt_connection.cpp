@@ -22,6 +22,7 @@ ClawMqttConnection::ClawMqttConnection(
       reconnectIntervalMilliseconds(reconnectIntervalMilliseconds),
       lastWifiConnectAttemptMilliseconds(0),
       lastMqttConnectAttemptMilliseconds(0),
+      lastUptimePublishMilliseconds(0),
       mqttClient(networkClient) {}
 
 void ClawMqttConnection::begin()
@@ -38,10 +39,7 @@ void ClawMqttConnection::maintainConnection()
 
   ensureMqttConnected();
   mqttClient.loop();
-
-  String uptimeTopic = String("clawmachine/") + mqttClientId + "/metadata/uptime";
-  mqttClient.publish(uptimeTopic.c_str(), String(millis()).c_str());
-  
+  publishUptimeIfDue();
 }
 
 bool ClawMqttConnection::ensureWifiConnected()
@@ -113,6 +111,18 @@ bool ClawMqttConnection::ensureMqttConnected()
   mqttClient.publish(statusTopic.c_str(), "online", true);
   resubscribeAll();
   return true;
+}
+
+void ClawMqttConnection::publishUptimeIfDue()
+{
+  const unsigned long now = millis();
+  if (now - lastUptimePublishMilliseconds < UPTIME_PUBLISH_INTERVAL_MILLISECONDS) {
+    return;
+  }
+  lastUptimePublishMilliseconds = now;
+
+  String uptimeTopic = String("clawmachine/") + mqttClientId + "/metadata/uptime";
+  mqttClient.publish(uptimeTopic.c_str(), String(now).c_str());
 }
 
 void ClawMqttConnection::setMessageCallback(void (*callback)(char *, uint8_t *, unsigned int))

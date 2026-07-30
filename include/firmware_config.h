@@ -29,7 +29,7 @@
 #endif
 
 #ifndef CLAW_MQTT_USER_PASSWORD
-#define CLAW_MQTT_USER_PASSWORD "claw"
+#define CLAW_MQTT_USER_PASSWORD "claw_secret"
 #endif
 
 #ifndef CLAW_DEVICE_ADDED_TOPIC

@@ -45,7 +45,6 @@ void loop()
   movementController.update();
 
   String payload = "Test"; 
-  motorControllerConnection.publish(CLAW_DEVICE_ADDED_TOPIC, payload.c_str());
   delay(20);
 }
 
