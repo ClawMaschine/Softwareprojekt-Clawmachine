@@ -116,7 +116,7 @@ class ClawMachine:
 
     def main_loop(self):
         while True:
-            self.mqtt_client.publish("/motor_controller/motor/command", "X:50");
+            self.mqtt_client.publish("clawmachine/motor_controller/motor/command", "X:50");
 
             time.sleep(1)
 
