@@ -2,6 +2,8 @@
 
 FROM python:3.11-slim
 
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
 COPY python_server/requirements.txt ./python_server/requirements.txt

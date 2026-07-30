@@ -26,6 +26,9 @@ INTERNAL_TOPIC_SUFFIX = "/internal"
 DEVICE_STATUS_TOPIC_WILDCARD = "clawmachine/+/status"
 DEVICE_STATUS_TOPIC_SUFFIX = "/status"
 
+MOTOR_CONTROLLER_COMMAND_TOPIC = "clawmachine/motor_controller/motor/command"
+MOTOR_COMMAND_PREFIXES = ("X:", "Y:", "Z:", "claw:")
+
 
 def extract_esp_name_from_topic(topic: str, suffix: str) -> Optional[str]:
     if topic.startswith(CLAWMACHINE_TOPIC_PREFIX) and topic.endswith(suffix):
@@ -112,12 +115,14 @@ class ClawMachine:
         if topic != self.control_topic:
             return
 
+        if payload_text.startswith(MOTOR_COMMAND_PREFIXES):
+            self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
+            return
+
         print(f"Unknown control command: {payload_text}")
 
     def main_loop(self):
         while True:
-            self.mqtt_client.publish("clawmachine/motor_controller/motor/command", "X:50");
-
             time.sleep(1)
 
     def move_to(self, x, y):

@@ -42,7 +42,7 @@ python3 scripts/run/start_project.py
 | `stop_project.py` | `scripts/run/` | **Projekt stoppen (TUI)** – alle Docker-Services stoppen |
 | `run_project.py` | `scripts/run/` | **Projekt-Dashboard (TUI)** – startet alle Services, zeigt jeden Container in eigenem Log-Tile; Strg+C stoppt alle Container |
 | `generate_firmware_config.py` | `scripts/dev/` | `config.ini` → `include/firmware_config.h` |
-| `run_emulated_esp_once.sh` | `scripts/dev/` | Simulierten ESP32 starten (Uptime-Daten an Broker) |
+| `run_emulated_esp_once.sh` | `scripts/dev/` | Simulierten ESP32 starten (`emulated` = nur Uptime, `steering` = Tastatursteuerung X/Y/Z + Klaue) |
 | `mqtt_broker_logs.sh` | `scripts/dev/` | Broker-Logs live anzeigen |
 | `mqtt_message_logs.sh` | `scripts/dev/` | Alle MQTT-Nachrichten mitschneiden (`#`) |
 
@@ -252,7 +252,10 @@ Geteilte Werte aus `config.ini` generieren: `python scripts/dev/generate_firmwar
 ## Emulator (ohne Hardware testen)
 
 ```bash
-./scripts/dev/run_emulated_esp_once.sh
+./scripts/dev/run_emulated_esp_once.sh              # generischer ESP (nur Uptime)
+./scripts/dev/run_emulated_esp_once.sh steering      # Tastatursteuerung (WASD + Q/E + O/C),
+                                                      # sendet X:/Y:/Z:/claw:-Befehle an den Server,
+                                                      # der Server leitet sie an den Motor-Controller weiter
 ```
 
 Simuliert ein ESP-Gerät und sendet Uptime-Daten an den Broker.
