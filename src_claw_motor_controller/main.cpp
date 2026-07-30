@@ -3,6 +3,9 @@
 #include "claw_mqtt_connection.h"
 #include "claw_motor_controller.h"
 #include "firmware_config.h"
+#include <ArduinoJson.h>
+
+void onMqttMessage(char *topic, uint8_t *payload, unsigned int length);
 
 ClawMqttConnection motorControllerConnection(
     CLAW_CLIENT_WIFI_SSID,
@@ -31,11 +34,47 @@ void setup()
   Serial.println(CLAW_MOTOR_CONTROLLER_CLIENT_ID);
   motorControllerConnection.begin();
   movementController.begin();
+  motorControllerConnection.setMessageCallback(onMqttMessage);
+  motorControllerConnection.begin();
+  motorControllerConnection.subscribe("clawmachine/motor_controller/command");
 }
 
 void loop()
 {
   motorControllerConnection.maintainConnection();
   movementController.update();
+
+  String payload = "Test"; 
+  motorControllerConnection.publish(CLAW_DEVICE_ADDED_TOPIC, payload.c_str());
   delay(20);
+}
+
+
+void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
+{
+  String message;
+  for (unsigned int i = 0; i < length; i++) {
+    message += (char)payload[i];   // payload ist NICHT null-terminiert!
+  }
+
+  Serial.print("[MOTOR_CONTROLLER] Nachricht auf ");
+  Serial.print(topic);
+  Serial.print(": ");
+  Serial.println(message);
+
+  if (strcmp(topic, "clawmachine/motor_controller/motor/command") == 0) {
+    if (message.startsWith("x:")) {
+      int speed = message.substring(2).toInt();
+      movementController.move('x', speed);
+    } else if (message.startsWith("y:")) {
+      int speed = message.substring(2).toInt();
+      movementController.move('y', speed);
+    } else if (message.startsWith("z:")) {
+      int speed = message.substring(2).toInt();
+      movementController.move('z', speed);
+    } else if (message.startsWith("claw:")) {
+      String command = message.substring(5);
+      movementController.moveClaw(command.c_str());
+    }
+  }
 }

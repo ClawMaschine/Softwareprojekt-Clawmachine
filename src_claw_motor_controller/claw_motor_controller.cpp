@@ -31,7 +31,6 @@ void ClawMotorController::begin()
   zMotor.begin();
   clawServo.begin();
 
-  connection.setMessageCallback(onMqttMessage);
   connection.subscribe(COMMAND_TOPIC);
 }
 
@@ -43,36 +42,12 @@ void ClawMotorController::update()
   zMotor.update();
 }
 
-void ClawMotorController::onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
-{
-  if (instance == nullptr) {
-    return;
-  }
-
-  char payloadStr[length + 1];
-  memcpy(payloadStr, payload, length);
-  payloadStr[length] = '\0';
-
-  if (strncmp(payloadStr, "x:", 2) == 0) {
-    instance->move('x', atoi(payloadStr + 2));
-  } else if (strncmp(payloadStr, "y:", 2) == 0) {
-    instance->move('y', atoi(payloadStr + 2));
-  } else if (strncmp(payloadStr, "z:", 2) == 0) {
-    instance->moveZ(constrain(atoi(payloadStr + 2), -100, 100));
-  } else if (strncmp(payloadStr, "claw:", 5) == 0) {
-    instance->moveClaw(payloadStr + 5);
-  } else {
-    Serial.print("[MOTOR] Unknown command: ");
-    Serial.println(payloadStr);
-  }
-}
 
 void ClawMotorController::move(char axis, int speed)
 {
   switch (axis) {
     case 'x':
       currentX = speed;
-      // TODO: Drehrichtung eines Motors invertieren, falls beide X-Motoren gegenläufig montiert sind.
       xMotorLeft.setSpeed(speed);
       xMotorRight.setSpeed(speed);
       Serial.printf("[MOTOR] X: %d\n", speed);
