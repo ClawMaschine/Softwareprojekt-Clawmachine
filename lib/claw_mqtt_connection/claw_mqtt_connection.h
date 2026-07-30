@@ -14,7 +14,7 @@ public:
       const char *mqttClientId,
       const char *mqttUsername,
       const char *mqttPassword,
-      unsigned long reconnectIntervalMilliseconds);
+      unsigned long reconnectIntervalMilliseconds); 
 
   void begin();
   void maintainConnection();
