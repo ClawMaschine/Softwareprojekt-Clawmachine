@@ -67,5 +67,4 @@ run_as_root chmod 755 docker/mosquitto/config
 print_info "Setup abgeschlossen"
 printf '\nNächste Schritte:\n'
 printf '  1. Neu anmelden (damit docker-Gruppe wirksam wird)\n'
-printf '  2. MQTT-Broker starten: ./scripts/run/start_mqtt_broker.sh\n'
-printf '  3. Server starten:      ./scripts/run/start_project.sh\n'
+printf '  2. Projekt starten: python3 scripts/run/start_project.py\n'
