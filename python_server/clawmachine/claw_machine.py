@@ -40,7 +40,6 @@ def extract_esp_name_from_topic(topic: str, suffix: str) -> Optional[str]:
 class ClawMachine:
 
     def __init__(self):
-        self.is_claw_open = False
 
         mqtt_configuration = load_mqtt_configuration()
         self.control_topic = mqtt_configuration.topic
@@ -77,6 +76,9 @@ class ClawMachine:
         mqtt_network_client.on_message = self.on_message
 
     def on_message(self, _client, _userdata, message):
+        # Callback von paho-mqtt für JEDE Nachricht auf einem abonnierten Topic
+        # (siehe setup_message_handlers). topic/payload kommen als bytes an,
+        # daher hier einmalig in str dekodieren.
         topic = (
             message.topic
             if isinstance(message.topic, str)
@@ -84,42 +86,61 @@ class ClawMachine:
         )
         payload_text = message.payload.decode("utf-8", errors="replace").strip()
         print(f"Received message on topic '{topic}': {payload_text}")
-        added_device_name = self.device_registry.extract_device_name(
-            topic, payload_text
-        )
-        if added_device_name is not None:
-            self.device_registry.register(added_device_name)
-            return
 
-        esp_name = extract_esp_name_from_topic(topic, METADATA_UPTIME_TOPIC_SUFFIX)
-        if esp_name is not None:
-            device = self.device_registry.get(esp_name)
-            if device is not None:
-                device.metadata.uptime_milliseconds = int(payload_text)
-            return
+        device = self.device_registry.get_by_topic(topic)
+        # switch/case über die Topic-Art. `case _ if ...` prüft "passt das Topic
+        # zu mir?" (per Walrus gleich mit dem extrahierten Wert), der erste
+        # Treffer gewinnt, kein Fallthrough — der abschließende `case _` ist
+        # der Default für alles, was zu keinem bekannten Topic passt.
+        match topic:
+            # 1) Neues/erneut verbundenes ESP32-Gerät meldet sich (clawmachine/device/added)
+            case _ if (
+                added_device_name := self.device_registry.extract_device_name(
+                    topic, payload_text
+                )
+            ) is not None:
+                self.device_registry.register(added_device_name)
 
-        esp_name = extract_esp_name_from_topic(topic, INTERNAL_TOPIC_SUFFIX)
-        if esp_name is not None:
-            device = self.device_registry.get(esp_name)
-            if device is not None:
-                device.on_message(topic, payload_text)
-            return
+            # 2) Heartbeat/Laufzeit eines Geräts (clawmachine/<name>/metadata/uptime)
+            case _ if (
+                esp_name := extract_esp_name_from_topic(topic, METADATA_UPTIME_TOPIC_SUFFIX)
+            ) is not None:
+                device = self.device_registry.get(esp_name)
+                if device is not None:
+                    device.metadata.uptime_milliseconds = int(payload_text)
 
-        esp_name = extract_esp_name_from_topic(topic, DEVICE_STATUS_TOPIC_SUFFIX)
-        if esp_name is not None:
-            device = self.device_registry.get(esp_name)
-            if device is not None:
-                device.is_online = payload_text == "online"
-            return
+            # 3) Geräte-interne Nachricht, wird an das jeweilige EspDevice weitergereicht
+            #    (clawmachine/<name>/internal)
+            case _ if (
+                esp_name := extract_esp_name_from_topic(topic, INTERNAL_TOPIC_SUFFIX)
+            ) is not None:
+                device = self.device_registry.get(esp_name)
+                if device is not None:
+                    device.on_message(topic, payload_text)
 
-        if topic != self.control_topic:
-            return
+            # 4) Online/Offline-Status eines Geräts, meist über LWT (Last Will) gesetzt
+            #    (clawmachine/<name>/status)
+            case _ if (
+                esp_name := extract_esp_name_from_topic(topic, DEVICE_STATUS_TOPIC_SUFFIX)
+            ) is not None:
+                device = self.device_registry.get(esp_name)
+                if device is not None:
+                    device.is_online = payload_text == "online"
 
-        if payload_text.startswith(MOTOR_COMMAND_PREFIXES):
-            self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
-            return
+            # 5) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
+            #    Haupt-Steuertopic — unverändert an den Motor-Controller weiterleiten
+            case _ if topic == self.control_topic and payload_text.startswith(
+                MOTOR_COMMAND_PREFIXES
+            ):
+                self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
 
-        print(f"Unknown control command: {payload_text}")
+            # Steuertopic, aber kein bekannter Befehl
+            case _ if topic == self.control_topic:
+                print(f"Unknown control command: {payload_text}")
+
+            # Default: passt zu keinem der obigen Topics — ignorieren
+            case _:
+                pass
 
     def main_loop(self):
         while True:

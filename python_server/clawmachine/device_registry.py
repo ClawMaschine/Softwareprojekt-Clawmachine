@@ -36,6 +36,8 @@ class DeviceRegistry:
 
     def get(self, name: str) -> Optional[EspDevice]:
         return self.devices_by_name.get(name)
+    
+    
 
     def extract_device_name(self, topic: str, payload_text: str) -> Optional[str]:
         if topic == self.device_added_topic:

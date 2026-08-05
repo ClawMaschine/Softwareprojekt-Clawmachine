@@ -8,4 +8,4 @@
 
 [mqtt]
 # Broker-Adresse des Servers im lokalen Netzwerk
-broker = 192.168.0.103
+broker = 127.0.0.1
