@@ -49,10 +49,14 @@ class RawTerminal:
     def __exit__(self, *_args):
         termios.tcsetattr(self.fd, termios.TCSADRAIN, self.original_settings)
 
-    def read_key(self):
-        if select.select([sys.stdin], [], [], 0)[0]:
-            return sys.stdin.read(1)
-        return None
+    def read_pending_keys(self):
+        # Liest ALLE gerade im Puffer wartenden Zeichen, nicht nur eins — sonst
+        # baut sich bei gehaltener Taste (OS-Auto-Repeat) ein Rueckstau auf, der
+        # neue Tastendruecke erst nach Abarbeiten der alten registrieren wuerde.
+        keys = []
+        while select.select([sys.stdin], [], [], 0)[0]:
+            keys.append(sys.stdin.read(1))
+        return keys
 
 
 def connect():
@@ -79,10 +83,10 @@ def main():
 
     with RawTerminal() as terminal:
         while True:
-            key = terminal.read_key()
+            keys = terminal.read_pending_keys()
             now = time.time()
 
-            if key:
+            for key in keys:
                 key = key.lower()
                 if key in AXIS_KEYS:
                     axis, speed = AXIS_KEYS[key]
