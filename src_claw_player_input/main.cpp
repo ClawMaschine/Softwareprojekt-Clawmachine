@@ -25,91 +25,91 @@ PanelInput  panelInput;
 
 static unsigned long lastInputReadMs = 0;
 
-// ── Bluepad32 callbacks ──────────────────────────────────────────────────────
+// // ── Bluepad32 callbacks ──────────────────────────────────────────────────────
 
-void onConnectedController(ControllerPtr controller)
-{
-    for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
-    {
-        if (connectedControllers[i] == nullptr)
-        {
-            connectedControllers[i] = controller;
-            Serial.print("[BLUEPAD32] Controller connected at index ");
-            Serial.println(i);
+// void onConnectedController(ControllerPtr controller)
+// {
+//     for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
+//     {
+//         if (connectedControllers[i] == nullptr)
+//         {
+//             connectedControllers[i] = controller;
+//             Serial.print("[BLUEPAD32] Controller connected at index ");
+//             Serial.println(i);
 
-            ControllerProperties properties = controller->getProperties();
-            Serial.printf(
-                "[BLUEPAD32] BTAddr: %02x:%02x:%02x:%02x:%02x:%02x\n",
-                properties.btaddr[0], properties.btaddr[1],
-                properties.btaddr[2], properties.btaddr[3],
-                properties.btaddr[4], properties.btaddr[5]);
-            return;
-        }
-    }
-    Serial.println("[BLUEPAD32] Controller connected, but no free slot available");
-}
+//             ControllerProperties properties = controller->getProperties();
+//             Serial.printf(
+//                 "[BLUEPAD32] BTAddr: %02x:%02x:%02x:%02x:%02x:%02x\n",
+//                 properties.btaddr[0], properties.btaddr[1],
+//                 properties.btaddr[2], properties.btaddr[3],
+//                 properties.btaddr[4], properties.btaddr[5]);
+//             return;
+//         }
+//     }
+//     Serial.println("[BLUEPAD32] Controller connected, but no free slot available");
+// }
 
-void onDisconnectedController(ControllerPtr controller)
-{
-    for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
-    {
-        if (connectedControllers[i] == controller)
-        {
-            connectedControllers[i] = nullptr;
+// void onDisconnectedController(ControllerPtr controller)
+// {
+//     for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
+//     {
+//         if (connectedControllers[i] == controller)
+//         {
+//             connectedControllers[i] = nullptr;
 
-            Serial.print("[BLUEPAD32] Controller disconnected from index ");
-            Serial.println(i);
-            return;
-        }
-    }
+//             Serial.print("[BLUEPAD32] Controller disconnected from index ");
+//             Serial.println(i);
+//             return;
+//         }
+//     }
 
-    Serial.println("[BLUEPAD32] Disconnected controller was not found");
-}
+//     Serial.println("[BLUEPAD32] Disconnected controller was not found");
+// }
 
-void printControllerStatus(ControllerPtr controller, int index)
-{
-    Serial.print("[JOYCON ");
-    Serial.print(index);
-    Serial.print("] ");
+// void printControllerStatus(ControllerPtr controller, int index)
+// {
+//     Serial.print("[JOYCON ");
+//     Serial.print(index);
+//     Serial.print("] ");
 
-    if (controller == nullptr)
-    {
-        Serial.println("status=disconnected");
-        return;
-    }
+//     if (controller == nullptr)
+//     {
+//         Serial.println("status=disconnected");
+//         return;
+//     }
 
-    if (!controller->isConnected())
-    {
-        Serial.println("status=disconnected");
-        return;
-    }
+//     if (!controller->isConnected())
+//     {
+//         Serial.println("status=disconnected");
+//         return;
+//     }
 
-    Serial.print("status=connected");
+//     Serial.print("status=connected");
 
-    Serial.print(" axisX=");
-    Serial.print(controller->axisX());
+//     Serial.print(" axisX=");
+//     Serial.print(controller->axisX());
 
-    Serial.print(" axisY=");
-    Serial.print(controller->axisY());
+//     Serial.print(" axisY=");
+//     Serial.print(controller->axisY());
 
-    Serial.print(" axisRX=");
-    Serial.print(controller->axisRX());
+//     Serial.print(" axisRX=");
+//     Serial.print(controller->axisRX());
 
-    Serial.print(" axisRY=");
-    Serial.print(controller->axisRY());
+//     Serial.print(" axisRY=");
+//     Serial.print(controller->axisRY());
 
-    Serial.print(" brake=");
-    Serial.print(controller->brake());
+//     Serial.print(" brake=");
+//     Serial.print(controller->brake());
 
-    Serial.print(" throttle=");
-    Serial.print(controller->throttle());
+//     Serial.print(" throttle=");
+//     Serial.print(controller->throttle());
 
-    Serial.print(" buttons=0x");
-    Serial.print(controller->buttons(), HEX);
+//     Serial.print(" buttons=0x");
+//     Serial.print(controller->buttons(), HEX);
 
-    Serial.print(" dpad=0x");
-    Serial.println(controller->dpad(), HEX);
-}
+//     Serial.print(" dpad=0x");
+//     Serial.println(controller->dpad(), HEX);
+// }
 
 void setup()
 {
@@ -121,35 +121,35 @@ void setup()
     Serial.println(CLAW_PLAYER_INPUT_CLIENT_ID);
     mqttConnection.begin();
 
-    Serial.println("[BLUEPAD32] Starting...");
+    // Serial.println("[BLUEPAD32] Starting...");
 
-    const uint8_t *address = BP32.localBdAddress();
-    Serial.print("[BLUEPAD32] Local BT address: ");
-    for (int i = 0; i < 6; i++)
-    {
-        if (i > 0) Serial.print(":");
-        Serial.printf("%02X", address[i]);
-    }
-    Serial.println("[BLUEPAD32] Starting...");
+    // const uint8_t *address = BP32.localBdAddress();
+    // Serial.print("[BLUEPAD32] Local BT address: ");
+    // for (int i = 0; i < 6; i++)
+    // {
+    //     if (i > 0) Serial.print(":");
+    //     Serial.printf("%02X", address[i]);
+    // }
+    // Serial.println("[BLUEPAD32] Starting...");
 
-    BP32.setup(
-        &onConnectedController,
-        &onDisconnectedController
-    );
+    // BP32.setup(
+    //     &onConnectedController,
+    //     &onDisconnectedController
+    // );
 
-    // Nur bei einem gewünschten vollständigen Pairing-Reset:
-    // BP32.forgetBluetoothKeys();
+    // // Nur bei einem gewünschten vollständigen Pairing-Reset:
+    // // BP32.forgetBluetoothKeys();
 
-    BP32.enableVirtualDevice(false);
+    // BP32.enableVirtualDevice(false);
 
-    Serial.println("[BLUEPAD32] Ready. Put Joy-Con into pairing mode.");
+    // Serial.println("[BLUEPAD32] Ready. Put Joy-Con into pairing mode.");
 }
 
 void loop()
 {
     mqttConnection.maintainConnection();
 
-    BP32.update();
+    // BP32.update();
 
     const unsigned long now = millis();
 
@@ -159,31 +159,31 @@ void loop()
         panelInput.read();
     }
 
-    static unsigned long lastControllerStatusMs = 0;
+    // static unsigned long lastControllerStatusMs = 0;
 
-    if (now - lastControllerStatusMs >= 1000)
-    {
-        lastControllerStatusMs = now;
+    // if (now - lastControllerStatusMs >= 1000)
+    // {
+    //     lastControllerStatusMs = now;
 
-        bool controllerFound = false;
+    //     bool controllerFound = false;
 
-        for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
-        {
-            if (connectedControllers[i] != nullptr)
-            {
-                controllerFound = true;
-                printControllerStatus(connectedControllers[i], i);
-            }
-        }
+    //     for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
+    //     {
+    //         if (connectedControllers[i] != nullptr)
+    //         {
+    //             controllerFound = true;
+    //             printControllerStatus(connectedControllers[i], i);
+    //         }
+    //     }
 
-        if (!controllerFound)
-        {
-            Serial.println(
-                "[JOYCON] disconnected "
-                "Waiting for controller..."
-            );
-        }
-    }
+    //     if (!controllerFound)
+    //     {
+    //         Serial.println(
+    //             "[JOYCON] disconnected "
+    //             "Waiting for controller..."
+    //         );
+    //     }
+    // }
 
     delay(1);
 }

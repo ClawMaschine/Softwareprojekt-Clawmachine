@@ -211,6 +211,20 @@ static bool initializeBluetoothScanner()
         return false;
     }
 
+    // Nach einem Soft-Reset (z.B. durch den Monitor/EN-Pin beim Flashen,
+    // nicht durch echtes Stromloswerden) kann der BT-Controller noch vom
+    // vorherigen Lauf aktiv sein — dann würde esp_bt_controller_init()
+    // weiter unten mit ESP_ERR_INVALID_STATE fehlschlagen. Deshalb hier
+    // erst sauber deinitialisieren, falls er nicht im IDLE-Zustand ist.
+    esp_bt_controller_status_t controllerStatus =
+        esp_bt_controller_get_status();
+
+    if (controllerStatus != ESP_BT_CONTROLLER_STATUS_IDLE)
+    {
+        esp_bt_controller_disable();
+        esp_bt_controller_deinit();
+    }
+
     // BLE-Speicher freigeben, weil hier nur Bluetooth Classic
     // verwendet wird.
     result = esp_bt_controller_mem_release(
@@ -371,21 +385,17 @@ void setup()
         Serial.println("[BT_SCAN] Initialization failed");
         return;
     }
-
     Serial.println("[BT_SCAN] Scanner ready");
 }
 
 void loop()
 {
     static unsigned long lastDeviceListMs = 0;
-
     const unsigned long now = millis();
-
     if (now - lastDeviceListMs >= 1000)
     {
         lastDeviceListMs = now;
         printBluetoothDeviceList();
     }
-
     delay(10);
 }
