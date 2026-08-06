@@ -93,7 +93,6 @@ class ClawMachine:
         payload_text = message.payload.decode("utf-8", errors="replace").strip()
         print(f"Received message on topic '{topic}': {payload_text}")
 
-        device = self.device_registry.get_by_topic(topic)
         # switch/case über die Topic-Art. `case _ if ...` prüft "passt das Topic
         # zu mir?" (per Walrus gleich mit dem extrahierten Wert), der erste
         # Treffer gewinnt, kein Fallthrough — der abschließende `case _` ist
