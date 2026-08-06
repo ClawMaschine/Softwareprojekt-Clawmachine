@@ -108,12 +108,20 @@ class ClawMachine:
                 match panel_buttons:
                     case {"right": 1}:
                         motor_command = f"X:{-PANEL_MOTOR_SPEED}"
+                    case {"right":0}:
+                        motor_command = f"X:0"
                     case {"left": 1}:
                         motor_command = f"X:{PANEL_MOTOR_SPEED}"
+                    case {"left":0}:
+                        motor_command = f"X:0"
                     case {"front": 1}:
                         motor_command = f"Y:{-PANEL_MOTOR_SPEED}"
+                    case {"front":0}:
+                        motor_command = f"Y:0"
                     case {"back": 1}:
                         motor_command = f"Y:{PANEL_MOTOR_SPEED}"
+                    case {"back":0}:
+                        motor_command = f"Y:0"
                     case _:
                         self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, "X:0")
                         self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, "Y:0")
