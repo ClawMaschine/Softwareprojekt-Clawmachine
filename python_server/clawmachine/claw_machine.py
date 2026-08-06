@@ -16,8 +16,6 @@ except ModuleNotFoundError:
 
 KNOWN_ESP_NAMES = ["motor_controller", "control_panel", "web_interface"]
 
-KNOWN_CONTROLL_DEVICES = [ "player_input", "web_interface" ]
-
 CLAWMACHINE_TOPIC_PREFIX = "clawmachine/"
 
 METADATA_UPTIME_TOPIC_WILDCARD = "clawmachine/+/metadata/uptime"
@@ -30,11 +28,14 @@ DEVICE_STATUS_TOPIC_WILDCARD = "clawmachine/+/status"
 DEVICE_STATUS_TOPIC_SUFFIX = "/status"
 
 MOTOR_CONTROLLER_COMMAND_TOPIC = "clawmachine/motor_controller/motor/command"
+# JSON-Settings-Update für den Motor-Controller (z.B. Beschleunigung) —
+# separates Topic von den X:/Y:/Z:/claw:-Bewegungsbefehlen, siehe
+# onMqttMessage() in src_claw_motor_controller/main.cpp.
+MOTOR_CONTROLLER_SETTINGS_TOPIC = "clawmachine/motor_controller/settings"
 MOTOR_COMMAND_PREFIXES = ("X:", "Y:", "Z:", "claw:")
 
-CONTROL_TOPIC = {device: f"clawmachine/{device}/control" for device in KNOWN_CONTROLL_DEVICES}
-
 PLAYER_INPUT_PANEL_TOPIC = "clawmachine/player_input/panel"
+WEBINTERFACE_COMMAND_TOPIC = "clawmachine/web_interface/command"
 PANEL_MOTOR_SPEED = 80
 
 
@@ -89,8 +90,7 @@ class ClawMachine:
         mqtt_network_client.subscribe(INTERNAL_TOPIC_WILDCARD)
         mqtt_network_client.subscribe(DEVICE_STATUS_TOPIC_WILDCARD)
         mqtt_network_client.subscribe(PLAYER_INPUT_PANEL_TOPIC)
-        for topic in CONTROL_TOPIC.values():
-            mqtt_network_client.subscribe(topic)
+        mqtt_network_client.subscribe(WEBINTERFACE_COMMAND_TOPIC)
         mqtt_network_client.on_message = self.on_message
 
     def on_message(self, _client, _userdata, message):
@@ -110,7 +110,7 @@ class ClawMachine:
         # Treffer gewinnt, kein Fallthrough — der abschließende `case _` ist
         # der Default für alles, was zu keinem bekannten Topic passt.
         match topic:
-            case _ if topic == CONTROL_TOPIC:
+            case _ if topic in (PLAYER_INPUT_PANEL_TOPIC, WEBINTERFACE_COMMAND_TOPIC):
                 self.on_control_command(topic, payload_text)
             # 7) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
             #    Haupt-Steuertopic — unverändert an den Motor-Controller weiterleiten
@@ -198,6 +198,19 @@ class ClawMachine:
                     self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"X:{value}")
                 elif name in ("front", "back"):
                     self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"Y:{value}")
+                elif name == "accel":
+                    # Eigenes Settings-Topic statt Bewegungsbefehl — der
+                    # Motor-Controller erwartet hier JSON, siehe
+                    # onMqttMessage() in src_claw_motor_controller/main.cpp.
+                    try:
+                        acceleration = float(value)
+                    except ValueError:
+                        print(f"Invalid acceleration value: {value}")
+                        return
+                    self.mqtt_client.publish(
+                        MOTOR_CONTROLLER_SETTINGS_TOPIC,
+                        json.dumps({"accelerationPercentPerSecond": acceleration}),
+                    )
                 else:
                     print(f"Unknown webinterface command: {payload_text}")
 

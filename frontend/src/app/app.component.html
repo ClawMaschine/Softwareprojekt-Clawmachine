@@ -48,7 +48,7 @@
 
   <!-- Steuerung -->
   <section class="section">
-    <h2 class="section-title">Steuerung <span class="topic-badge">clawmachine/claw</span></h2>
+    <h2 class="section-title">Steuerung <span class="topic-badge">clawmachine/web_interface/command</span></h2>
     <div class="control-panel">
       <div class="dpad">
         <button
@@ -91,6 +91,23 @@
           [disabled]="connectionStatus !== 'connected'"
           (click)="sendClaw('close')"
         >Klaue schließen</button>
+      </div>
+      <div class="accel-controls">
+        <label class="accel-label" for="accel-input">Beschleunigung (%/s)</label>
+        <input
+          id="accel-input"
+          class="accel-input"
+          type="number"
+          min="0"
+          step="1"
+          [(ngModel)]="accelerationPercentPerSecond"
+          [disabled]="connectionStatus !== 'connected'"
+        />
+        <button
+          class="btn btn-claw"
+          [disabled]="connectionStatus !== 'connected'"
+          (click)="sendAcceleration()"
+        >Setzen</button>
       </div>
     </div>
   </section>

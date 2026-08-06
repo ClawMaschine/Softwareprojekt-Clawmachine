@@ -16,7 +16,8 @@ public:
       uint8_t motorShieldAI2cAddress,
       uint8_t motorShieldBI2cAddress,
       uint16_t maxRevolutionsPerMinute,
-      uint8_t clawServoPin);
+      uint8_t clawServoPin,
+      float accelerationPercentPerSecond = 0);
 
   void begin();
   void update();
@@ -24,6 +25,7 @@ public:
   void move(char axis, int speed);
   void moveZ(int speed);
   void moveClaw(const char *command);
+  void setAcceleration(float percentPerSecond);
 
 private:
 
@@ -33,6 +35,7 @@ private:
 
   uint8_t motorShieldAI2cAddress;
   uint8_t motorShieldBI2cAddress;
+  float accelerationPercentPerSecond;
   Adafruit_MotorShield motorShieldA;
   Adafruit_MotorShield motorShieldB;
 

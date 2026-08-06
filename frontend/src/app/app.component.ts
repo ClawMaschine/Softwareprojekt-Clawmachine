@@ -24,6 +24,10 @@ export class AppComponent implements OnInit, OnDestroy {
   // sich die Web-Steuerung wie das physische Panel verhält.
   readonly controlSpeed = 80;
 
+  // Gleicher Default wie CLAW_MOTOR_ACCELERATION_PERCENT_PER_SECOND in
+  // firmware_config.h — Prozentpunkte Geschwindigkeit pro Sekunde.
+  accelerationPercentPerSecond = 50;
+
   private subs: Subscription[] = [];
 
   constructor(readonly mqttService: MqttService) {}
@@ -99,6 +103,10 @@ export class AppComponent implements OnInit, OnDestroy {
 
   sendClaw(action: 'open' | 'close'): void {
     this.mqttService.publishCommand(`claw:${action}`);
+  }
+
+  sendAcceleration(): void {
+    this.mqttService.publishCommand(`accel:${this.accelerationPercentPerSecond}`);
   }
 
   timeLabel(d: Date): string {

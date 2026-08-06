@@ -120,6 +120,12 @@
 #ifndef CLAW_MOTOR_MAX_REVOLUTIONS_PER_MINUTE
 #define CLAW_MOTOR_MAX_REVOLUTIONS_PER_MINUTE 120
 #endif
+// Beschleunigung in Prozentpunkten Geschwindigkeit pro Sekunde — 200 heisst
+// z.B. von Stillstand auf volle Geschwindigkeit in 0.5s. An tatsächliche
+// Mechanik/Gewicht der Klaue anpassen.
+#ifndef CLAW_MOTOR_ACCELERATION_PERCENT_PER_SECOND
+#define CLAW_MOTOR_ACCELERATION_PERCENT_PER_SECOND 50
+#endif
 #ifndef CLAW_CLAW_SERVO_PIN
 #define CLAW_CLAW_SERVO_PIN 13
 #endif

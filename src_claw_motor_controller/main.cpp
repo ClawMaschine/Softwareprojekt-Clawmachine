@@ -40,7 +40,8 @@ ClawMotorController movementController(
     CLAW_MOTOR_SHIELD_A_I2C_ADDRESS,
     CLAW_MOTOR_SHIELD_B_I2C_ADDRESS,
     CLAW_MOTOR_MAX_REVOLUTIONS_PER_MINUTE,
-    CLAW_CLAW_SERVO_PIN);
+    CLAW_CLAW_SERVO_PIN,
+    CLAW_MOTOR_ACCELERATION_PERCENT_PER_SECOND);
 
 void setup()
 {
@@ -58,6 +59,7 @@ void setup()
   motorControllerConnection.setMessageCallback(onMqttMessage);
   motorControllerConnection.begin();
   motorControllerConnection.subscribe("clawmachine/motor_controller/motor/command");
+  motorControllerConnection.subscribe("clawmachine/motor_controller/settings");
 }
 
 void loop()
@@ -79,7 +81,21 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
   Serial.print(": ");
   Serial.println(message);
 
-  if (strcmp(topic, "clawmachine/motor_controller/motor/command") == 0) {
+  if (strcmp(topic, "clawmachine/motor_controller/settings") == 0) {
+    // JSON-Settings-Update, z.B. {"accelerationPercentPerSecond": 50}
+    JsonDocument jsonDoc;
+    DeserializationError error = deserializeJson(jsonDoc, message);
+    if (error) {
+      Serial.print("[MOTOR_CONTROLLER] Fehler beim Parsen der Settings-Nachricht: ");
+      Serial.println(error.c_str());
+      return;
+    }
+
+    if (!jsonDoc["accelerationPercentPerSecond"].isNull()) {
+      float newAcceleration = jsonDoc["accelerationPercentPerSecond"].as<float>();
+      movementController.setAcceleration(newAcceleration);
+    }
+  } else if (strcmp(topic, "clawmachine/motor_controller/motor/command") == 0) {
     if (message.startsWith("X:")) {
       int speed = message.substring(2).toInt();
       movementController.move('X', speed);
