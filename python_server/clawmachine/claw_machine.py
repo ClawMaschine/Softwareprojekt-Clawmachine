@@ -140,11 +140,17 @@ class ClawMachine:
                 panel_buttons = json.loads(payload_text)
                 match panel_buttons:
                     case {"right": 1}:
-                        motor_command = f"X:{PANEL_MOTOR_SPEED}"
-                    case {"left": 1}:
                         motor_command = f"X:{-PANEL_MOTOR_SPEED}"
+                    case {"left": 1}:
+                        motor_command = f"X:{PANEL_MOTOR_SPEED}"
+                    case {"front": 1}:
+                        motor_command = f"Y:{-PANEL_MOTOR_SPEED}"
+                    case {"back": 1}:
+                        motor_command = f"Y:{PANEL_MOTOR_SPEED}"
                     case _:
                         motor_command = "X:0"
+                        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, "Y:0")
+
                 self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, motor_command)
 
             # 6) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
