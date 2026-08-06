@@ -93,6 +93,10 @@ bool ClawMqttConnection::ensureMqttConnected()
   Serial.println(mqttBrokerPort);
 
   String statusTopic = String("clawmachine/") + mqttClientId + "/status";
+  Serial.print("MQTT user: ");
+  Serial.println(mqttUsername);
+  Serial.print("MQTT psw: ");
+  Serial.println(mqttPassword);
   const bool connectionSuccessful = mqttClient.connect(
       mqttClientId, mqttUsername, mqttPassword,
       statusTopic.c_str(), 1, true, "offline");
