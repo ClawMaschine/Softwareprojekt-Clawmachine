@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Subscription, interval } from 'rxjs';
 import { MqttService, ConnectionStatus, DeviceState, MessageLog } from './services/mqtt.service';
 import { DeviceCardComponent } from './components/device-card/device-card.component';
+import { environment } from '../environments/environment';
 
 @Component({
   selector: 'app-root',
@@ -13,7 +14,7 @@ import { DeviceCardComponent } from './components/device-card/device-card.compon
   styleUrl: './app.component.css',
 })
 export class AppComponent implements OnInit, OnDestroy {
-  brokerUrl = `ws://${window.location.hostname}:8083`;
+  brokerUrl = `ws://${window.location.hostname}:${environment.mqttWebsocketPort}`;
   connectionStatus: ConnectionStatus = 'disconnected';
   devices: DeviceState[] = [];
   commandLog: MessageLog[] = [];

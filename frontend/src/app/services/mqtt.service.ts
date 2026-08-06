@@ -1,6 +1,7 @@
 import { Injectable, NgZone, OnDestroy } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 import mqtt, { MqttClient } from 'mqtt';
+import { environment } from '../../environments/environment';
 
 export interface DeviceState {
   id: string;
@@ -50,8 +51,8 @@ export class MqttService implements OnDestroy {
 
     this.client = mqtt.connect(brokerUrl, {
       clientId: `clawmachine_dashboard_${Math.random().toString(16).substring(2, 8)}`,
-      username: 'clawmachine',
-      password: 'claw_secret',
+      username: environment.mqttUsername,
+      password: environment.mqttPassword,
       reconnectPeriod: 3000,
     });
 
