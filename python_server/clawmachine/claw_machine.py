@@ -14,7 +14,7 @@ except ModuleNotFoundError:
     from mqtt import MQTTClient
     from device_registry import DeviceRegistry
 
-KNOWN_ESP_NAMES = ["motor_controller", "control_panel"]
+KNOWN_ESP_NAMES = ["motor_controller", "control_panel", "web_interface"]
 
 CLAWMACHINE_TOPIC_PREFIX = "clawmachine/"
 
@@ -32,6 +32,7 @@ MOTOR_COMMAND_PREFIXES = ("X:", "Y:", "Z:", "claw:")
 
 
 PLAYER_INPUT_PANEL_TOPIC = "clawmachine/player_input/panel"
+WEBINTERFACE_COMMAND_TOPIC = "clawmachine/web_interface/command"
 PANEL_MOTOR_SPEED = 80
 
 
@@ -86,6 +87,7 @@ class ClawMachine:
         mqtt_network_client.subscribe(INTERNAL_TOPIC_WILDCARD)
         mqtt_network_client.subscribe(DEVICE_STATUS_TOPIC_WILDCARD)
         mqtt_network_client.subscribe(PLAYER_INPUT_PANEL_TOPIC)
+        mqtt_network_client.subscribe(WEBINTERFACE_COMMAND_TOPIC)
         mqtt_network_client.on_message = self.on_message
 
     def on_message(self, _client, _userdata, message):
@@ -106,24 +108,7 @@ class ClawMachine:
         # der Default für alles, was zu keinem bekannten Topic passt.
         match topic:
             
-            # 5) Panel-Eingabe (clawmachine/player_input/panel). Das Panel schickt
-            #    den Zustand ALLER Tasten als JSON ({"left":0,"right":1,...}), der
-            #    Motor-Controller kennt aber nur X:/Y:/Z:/claw: — also hier uebersetzen.
-            #    Keine Taste gedrueckt heisst losgelassen und damit X:0 (Stopp).
             case _ if topic == PLAYER_INPUT_PANEL_TOPIC:
-                # Kein match/case hier: das Panel schickt nur noch die Tasten,
-                # die sich seit der letzten Nachricht geändert haben (z.B. nur
-                # {"right":1}), nicht mehr den kompletten Zustand. Ein
-                # Mapping-Pattern wie `case {"right": 1}` würde außerdem schon
-                # matchen, sobald der Key "right" vorhanden ist — unabhängig
-                # von den anderen Keys — und X-/Y-Achse sind ohnehin zwei
-                # unabhängige Werte, keine einzelne Auswahl aus acht Optionen.
-                #
-                # Da nur Deltas ankommen, wird der Zustand hier über mehrere
-                # Nachrichten hinweg gemergt (self.panel_button_state) statt
-                # pro Nachricht neu berechnet — sonst würde z.B. eine reine
-                # {"grab":1}-Nachricht "right" fälschlich als losgelassen
-                # behandeln, nur weil sie es nicht erwähnt.
                 panel_buttons = json.loads(payload_text)
                 self.panel_button_state.update(panel_buttons)
 
@@ -144,14 +129,29 @@ class ClawMachine:
                 self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"X:{x_speed}")
                 self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"Y:{y_speed}")
 
-            # 6) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
+            # 6) Steuerbefehl vom Webinterface (z.B. "left:80", "front:-80",
+            #    "claw:open") — das Webinterface rechnet die Geschwindigkeit
+            #    schon selbst aus (siehe app.component.ts), der Server muss
+            #    hier nur noch den Tastennamen auf die Motor-Achse mappen.
+            case _ if topic == WEBINTERFACE_COMMAND_TOPIC:
+                name, _, value = payload_text.strip().partition(":")
+
+                if name == "claw":
+                    self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
+                elif name in ("left", "right"):
+                    self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"X:{value}")
+                elif name in ("front", "back"):
+                    self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"Y:{value}")
+                else:
+                    print(f"Unknown webinterface command: {payload_text}")
+
+            # 7) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
             #    Haupt-Steuertopic — unverändert an den Motor-Controller weiterleiten
             case _ if topic == self.control_topic and payload_text.startswith(
                 MOTOR_COMMAND_PREFIXES
             ):
                 self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
 
-            
             # 1) Neues/erneut verbundenes ESP32-Gerät meldet sich (clawmachine/device/added)
             case _ if (
                 added_device_name := self.device_registry.extract_device_name(

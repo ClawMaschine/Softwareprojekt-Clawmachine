@@ -20,6 +20,10 @@ export class AppComponent implements OnInit, OnDestroy {
   commandLog: MessageLog[] = [];
   inputLog: MessageLog[] = [];
 
+  // Gleiche Geschwindigkeit wie PANEL_MOTOR_SPEED in claw_machine.py, damit
+  // sich die Web-Steuerung wie das physische Panel verhält.
+  readonly controlSpeed = 80;
+
   private subs: Subscription[] = [];
 
   constructor(readonly mqttService: MqttService) {}
@@ -67,6 +71,34 @@ export class AppComponent implements OnInit, OnDestroy {
 
   shortTopic(topic: string): string {
     return topic.replace('clawmachine/', '');
+  }
+
+  // Achsen-Vorzeichen spiegeln die Server-Logik für das physische Panel
+  // (siehe claw_machine.py): rechts/unten = negative Geschwindigkeit,
+  // links/oben = positive Geschwindigkeit. Der Server mappt "left"/"right"
+  // auf X und "front"/"back" auf Y — der tatsächliche Tastenname muss also
+  // mitgeschickt werden, nicht nur die Geschwindigkeit.
+  startMoveX(direction: 'left' | 'right'): void {
+    const speed = direction === 'left' ? this.controlSpeed : -this.controlSpeed;
+    this.mqttService.publishCommand(`${direction}:${speed}`);
+  }
+
+  startMoveY(direction: 'up' | 'down'): void {
+    const name = direction === 'up' ? 'front' : 'back';
+    const speed = direction === 'up' ? -this.controlSpeed : this.controlSpeed;
+    this.mqttService.publishCommand(`${name}:${speed}`);
+  }
+
+  stopMoveX(): void {
+    this.mqttService.publishCommand('left:0');
+  }
+
+  stopMoveY(): void {
+    this.mqttService.publishCommand('front:0');
+  }
+
+  sendClaw(action: 'open' | 'close'): void {
+    this.mqttService.publishCommand(`claw:${action}`);
   }
 
   timeLabel(d: Date): string {

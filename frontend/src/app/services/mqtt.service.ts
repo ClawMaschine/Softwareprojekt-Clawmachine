@@ -19,11 +19,23 @@ export interface MessageLog {
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
+// Haupt-Steuertopic des Servers — Befehle mit X:/Y:/Z:/claw:-Präfix werden
+// dort unverändert an den Motor-Controller weitergeleitet (siehe
+// MOTOR_COMMAND_PREFIXES in python_server/clawmachine/claw_machine.py).
+const CONTROL_TOPIC = 'clawmachine/web_interface/command';
+
 const KNOWN_DEVICES: Record<string, string> = {
   motor_controller: 'Motor Controller',
   control_panel:    'Control Panel',
+  web_interface:    'Web Interface',
   player_input:     'Player Input',
 };
+
+// Wie bei den ESP-Boards: eigenes Status-Topic mit Last-Will (siehe
+// ClawMqttConnection::ensureMqttConnected in claw_mqtt_connection.cpp) —
+// das Webinterface soll sich genau wie player_input als eigenes Gerät
+// mit Online/Offline-Status im Dashboard zeigen, nicht nur Befehle senden.
+const STATUS_TOPIC = 'clawmachine/web_interface/status';
 
 @Injectable({ providedIn: 'root' })
 export class MqttService implements OnDestroy {
@@ -54,13 +66,19 @@ export class MqttService implements OnDestroy {
       username: environment.mqttUsername,
       password: environment.mqttPassword,
       reconnectPeriod: 3000,
+      // Last Will — bricht die Browser-Tab die Verbindung ab (Reload, Tab zu),
+      // markiert der Broker uns automatisch als offline. Gleiches Prinzip wie
+      // die ESP-Boards in ClawMqttConnection::ensureMqttConnected().
+      will: { topic: STATUS_TOPIC, payload: 'offline', qos: 1, retain: true },
     });
 
     this.client.on('connect', () => {
       this.ngZone.run(() => this.connectionStatus$.next('connected'));
+      this.client!.publish(STATUS_TOPIC, 'online', { retain: true });
       this.client!.subscribe('clawmachine/+/status');
       this.client!.subscribe('clawmachine/+/metadata/uptime');
       this.client!.subscribe('clawmachine/motor_controller/command');
+      this.client!.subscribe('clawmachine/web_interface/command');
       this.client!.subscribe('clawmachine/player_input/joycon');
       this.client!.subscribe('clawmachine/player_input/panel');
     });
@@ -83,8 +101,19 @@ export class MqttService implements OnDestroy {
   }
 
   disconnect(): void {
+    // Bei sauberem Trennen explizit offline melden statt nur aufs LWT zu
+    // warten (das greift erst, wenn der Broker den Verbindungsabbruch
+    // erkennt — bei einem bewussten "Trennen"-Klick soll das sofort sichtbar sein).
+    this.client?.publish(STATUS_TOPIC, 'offline', { retain: true });
     this.client?.end();
     this.client = null;
+  }
+
+  publishCommand(command: string): void {
+    if (!this.client || !this.client.connected) {
+      return;
+    }
+    this.client.publish(CONTROL_TOPIC, command);
   }
 
   private handleMessage(topic: string, payload: string): void {
@@ -101,6 +130,8 @@ export class MqttService implements OnDestroy {
         this.updateDevice(parts[1], { uptimeMs: ms, lastSeen: new Date() });
       }
     } else if (topic === 'clawmachine/motor_controller/command') {
+      this.appendLog(this.commandLog$, topic, payload);
+    } else if (topic === 'clawmachine/web_interface/command') {
       this.appendLog(this.commandLog$, topic, payload);
     } else if (
       topic === 'clawmachine/player_input/joycon' ||
