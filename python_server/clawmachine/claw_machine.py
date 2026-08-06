@@ -181,10 +181,17 @@ class ClawMachine:
                     y_speed = -PANEL_MOTOR_SPEED
                 else:
                     y_speed = 0
+                    
+                if self.panel_button_state.get("up"):
+                    z_speed = PANEL_MOTOR_SPEED
+                elif self.panel_button_state.get("down"):
+                    z_speed = -PANEL_MOTOR_SPEED
+                else:
+                    z_speed = 0
 
                 self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"X:{x_speed}")
                 self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"Y:{y_speed}")
-
+                self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"Z:{z_speed}")
             # 6) Steuerbefehl vom Webinterface (z.B. "left:80", "front:-80",
             #    "claw:open") — das Webinterface rechnet die Geschwindigkeit
             #    schon selbst aus (siehe app.component.ts), der Server muss
