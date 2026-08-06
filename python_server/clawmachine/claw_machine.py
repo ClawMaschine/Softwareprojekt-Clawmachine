@@ -98,6 +98,37 @@ class ClawMachine:
         # Treffer gewinnt, kein Fallthrough — der abschließende `case _` ist
         # der Default für alles, was zu keinem bekannten Topic passt.
         match topic:
+            
+            # 5) Panel-Eingabe (clawmachine/player_input/panel). Das Panel schickt
+            #    den Zustand ALLER Tasten als JSON ({"left":0,"right":1,...}), der
+            #    Motor-Controller kennt aber nur X:/Y:/Z:/claw: — also hier uebersetzen.
+            #    Keine Taste gedrueckt heisst losgelassen und damit X:0 (Stopp).
+            case _ if topic == PLAYER_INPUT_PANEL_TOPIC:
+                panel_buttons = json.loads(payload_text)
+                match panel_buttons:
+                    case {"right": 1}:
+                        motor_command = f"X:{-PANEL_MOTOR_SPEED}"
+                    case {"left": 1}:
+                        motor_command = f"X:{PANEL_MOTOR_SPEED}"
+                    case {"front": 1}:
+                        motor_command = f"Y:{-PANEL_MOTOR_SPEED}"
+                    case {"back": 1}:
+                        motor_command = f"Y:{PANEL_MOTOR_SPEED}"
+                    case _:
+                        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, "X:0")
+                        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, "Y:0")
+                if motor_command:
+                    self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, motor_command)
+                motor_command = None  # Reset for next message
+
+            # 6) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
+            #    Haupt-Steuertopic — unverändert an den Motor-Controller weiterleiten
+            case _ if topic == self.control_topic and payload_text.startswith(
+                MOTOR_COMMAND_PREFIXES
+            ):
+                self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
+
+            
             # 1) Neues/erneut verbundenes ESP32-Gerät meldet sich (clawmachine/device/added)
             case _ if (
                 added_device_name := self.device_registry.extract_device_name(
@@ -131,35 +162,7 @@ class ClawMachine:
                 device = self.device_registry.get(esp_name)
                 if device is not None:
                     device.is_online = payload_text == "online"
-
-            # 5) Panel-Eingabe (clawmachine/player_input/panel). Das Panel schickt
-            #    den Zustand ALLER Tasten als JSON ({"left":0,"right":1,...}), der
-            #    Motor-Controller kennt aber nur X:/Y:/Z:/claw: — also hier uebersetzen.
-            #    Keine Taste gedrueckt heisst losgelassen und damit X:0 (Stopp).
-            case _ if topic == PLAYER_INPUT_PANEL_TOPIC:
-                panel_buttons = json.loads(payload_text)
-                match panel_buttons:
-                    case {"right": 1}:
-                        motor_command = f"X:{-PANEL_MOTOR_SPEED}"
-                    case {"left": 1}:
-                        motor_command = f"X:{PANEL_MOTOR_SPEED}"
-                    case {"front": 1}:
-                        motor_command = f"Y:{-PANEL_MOTOR_SPEED}"
-                    case {"back": 1}:
-                        motor_command = f"Y:{PANEL_MOTOR_SPEED}"
-                    case _:
-                        motor_command = "X:0"
-                        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, "Y:0")
-
-                self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, motor_command)
-
-            # 6) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
-            #    Haupt-Steuertopic — unverändert an den Motor-Controller weiterleiten
-            case _ if topic == self.control_topic and payload_text.startswith(
-                MOTOR_COMMAND_PREFIXES
-            ):
-                self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
-
+                    
             # Steuertopic, aber kein bekannter Befehl
             case _ if topic == self.control_topic:
                 print(f"Unknown control command: {payload_text}")
