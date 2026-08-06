@@ -1,9 +1,8 @@
 #include <Arduino.h>
-#include <Bluepad32.h>
 
 #include "claw_mqtt_connection.h"
 #include "firmware_config.h"
-#include "joy_con_input.h"
+// #include "joy_con_input.h"
 #include "panel_input.h"
 
 static constexpr const char *JOYCON_TOPIC = "clawmachine/player_input/joycon";
@@ -19,8 +18,8 @@ ClawMqttConnection mqttConnection(
     CLAW_MQTT_USER_PASSWORD,
     CLAW_CONNECTION_RETRY_INTERVAL_MS);
 
-ControllerPtr connectedControllers[BP32_MAX_GAMEPADS];
-JoyConInput joyConInput;
+// ControllerPtr connectedControllers[BP32_MAX_GAMEPADS];
+// JoyConInput joyConInput;
 PanelInput  panelInput;
 
 static unsigned long lastInputReadMs = 0;
@@ -153,10 +152,24 @@ void loop()
 
     const unsigned long now = millis();
 
-    if (now - lastInputReadMs >= 100)
+    if (now - lastInputReadMs >= 50)
     {
         lastInputReadMs = now;
         panelInput.read();
+    }
+
+    if (panelInput.isValid())
+    {
+        char payload[128];
+        snprintf(
+            payload,
+            sizeof(payload),
+            "{\"left\":%d,\"right\":%d}",
+            panelInput.left_button,
+            panelInput.right_button);
+            
+        mqttConnection.publish(PANEL_TOPIC, payload);
+        Serial.printf("[PLAYER_INPUT] Published panel input: %s\n", payload);
     }
 
     // static unsigned long lastControllerStatusMs = 0;

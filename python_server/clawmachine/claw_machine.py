@@ -137,7 +137,6 @@ class ClawMachine:
             # Steuertopic, aber kein bekannter Befehl
             case _ if topic == self.control_topic:
                 print(f"Unknown control command: {payload_text}")
-
             # Default: passt zu keinem der obigen Topics — ignorieren
             case _:
                 pass
