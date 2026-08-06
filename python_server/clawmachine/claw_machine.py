@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 import time
 from typing import Optional
 
@@ -29,7 +30,8 @@ DEVICE_STATUS_TOPIC_SUFFIX = "/status"
 MOTOR_CONTROLLER_COMMAND_TOPIC = "clawmachine/motor_controller/motor/command"
 MOTOR_COMMAND_PREFIXES = ("X:", "Y:", "Z:", "claw:")
 
-PLAYER_INPUT_PANEL_PREFIXES = ("left:", "right:")
+
+PLAYER_INPUT_PANEL_TOPIC = "clawmachine/player_input/panel"
 PANEL_MOTOR_SPEED = 80
 
 
@@ -76,6 +78,7 @@ class ClawMachine:
         mqtt_network_client.subscribe(METADATA_UPTIME_TOPIC_WILDCARD)
         mqtt_network_client.subscribe(INTERNAL_TOPIC_WILDCARD)
         mqtt_network_client.subscribe(DEVICE_STATUS_TOPIC_WILDCARD)
+        mqtt_network_client.subscribe(PLAYER_INPUT_PANEL_TOPIC)
         mqtt_network_client.on_message = self.on_message
 
     def on_message(self, _client, _userdata, message):
@@ -130,17 +133,19 @@ class ClawMachine:
                 if device is not None:
                     device.is_online = payload_text == "online"
 
-            # 5) Panel-Eingabe (z.B. "left:", "right:") auf dem Haupt-Steuertopic.
-            #    Der Motor-Controller kennt nur X:/Y:/Z:/claw:, also wird die
-            #    Richtung hier in ein Motorkommando auf der X-Achse uebersetzt.
-            case _ if topic == self.control_topic and payload_text.startswith(
-                PLAYER_INPUT_PANEL_PREFIXES
-            ):
-                match payload_text:
-                    case _ if payload_text.startswith("right:"):
+            # 5) Panel-Eingabe (clawmachine/player_input/panel). Das Panel schickt
+            #    den Zustand ALLER Tasten als JSON ({"left":0,"right":1,...}), der
+            #    Motor-Controller kennt aber nur X:/Y:/Z:/claw: — also hier uebersetzen.
+            #    Keine Taste gedrueckt heisst losgelassen und damit X:0 (Stopp).
+            case _ if topic == PLAYER_INPUT_PANEL_TOPIC:
+                panel_buttons = json.loads(payload_text)
+                match panel_buttons:
+                    case {"right": 1}:
                         motor_command = f"X:{PANEL_MOTOR_SPEED}"
-                    case _:
+                    case {"left": 1}:
                         motor_command = f"X:{-PANEL_MOTOR_SPEED}"
+                    case _:
+                        motor_command = "X:0"
                 self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, motor_command)
 
             # 6) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
