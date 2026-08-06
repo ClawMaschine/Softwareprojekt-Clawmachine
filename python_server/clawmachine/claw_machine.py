@@ -29,6 +29,9 @@ DEVICE_STATUS_TOPIC_SUFFIX = "/status"
 MOTOR_CONTROLLER_COMMAND_TOPIC = "clawmachine/motor_controller/motor/command"
 MOTOR_COMMAND_PREFIXES = ("X:", "Y:", "Z:", "claw:")
 
+PLAYER_INPUT_PANEL_PREFIXES = ("left:", "right:")
+PANEL_MOTOR_SPEED = 80
+
 
 def extract_esp_name_from_topic(topic: str, suffix: str) -> Optional[str]:
     if topic.startswith(CLAWMACHINE_TOPIC_PREFIX) and topic.endswith(suffix):
@@ -127,7 +130,20 @@ class ClawMachine:
                 if device is not None:
                     device.is_online = payload_text == "online"
 
-            # 5) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
+            # 5) Panel-Eingabe (z.B. "left:", "right:") auf dem Haupt-Steuertopic.
+            #    Der Motor-Controller kennt nur X:/Y:/Z:/claw:, also wird die
+            #    Richtung hier in ein Motorkommando auf der X-Achse uebersetzt.
+            case _ if topic == self.control_topic and payload_text.startswith(
+                PLAYER_INPUT_PANEL_PREFIXES
+            ):
+                match payload_text:
+                    case _ if payload_text.startswith("right:"):
+                        motor_command = f"X:{PANEL_MOTOR_SPEED}"
+                    case _:
+                        motor_command = f"X:{-PANEL_MOTOR_SPEED}"
+                self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, motor_command)
+
+            # 6) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
             #    Haupt-Steuertopic — unverändert an den Motor-Controller weiterleiten
             case _ if topic == self.control_topic and payload_text.startswith(
                 MOTOR_COMMAND_PREFIXES
