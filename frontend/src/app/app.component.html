@@ -93,6 +93,18 @@
         >Klaue schließen</button>
       </div>
       <div class="accel-controls">
+        <label class="accel-label" for="speed-input">Geschwindigkeit (%)</label>
+        <input
+          id="speed-input"
+          class="accel-input"
+          type="number"
+          min="0"
+          max="100"
+          step="1"
+          [(ngModel)]="controlSpeed"
+        />
+      </div>
+      <div class="accel-controls">
         <label class="accel-label" for="accel-input">Beschleunigung (%/s)</label>
         <input
           id="accel-input"

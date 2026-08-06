@@ -20,9 +20,11 @@ export class AppComponent implements OnInit, OnDestroy {
   commandLog: MessageLog[] = [];
   inputLog: MessageLog[] = [];
 
-  // Gleiche Geschwindigkeit wie PANEL_MOTOR_SPEED in claw_machine.py, damit
-  // sich die Web-Steuerung wie das physische Panel verhält.
-  readonly controlSpeed = 80;
+  // Gleicher Default wie PANEL_MOTOR_SPEED in claw_machine.py. Anders als die
+  // Beschleunigung ist das keine Einstellung auf dem ESP, sondern wird bei
+  // jedem Bewegungsbefehl direkt mitgeschickt (z.B. "left:80") — ein Eingabe-
+  // feld hier reicht deshalb, kein zusätzliches MQTT-Roundtrip/Settings-Topic.
+  controlSpeed = 80;
 
   // Gleicher Default wie CLAW_MOTOR_ACCELERATION_PERCENT_PER_SECOND in
   // firmware_config.h — Prozentpunkte Geschwindigkeit pro Sekunde.
