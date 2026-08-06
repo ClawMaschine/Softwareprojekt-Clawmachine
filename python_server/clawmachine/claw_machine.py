@@ -63,6 +63,13 @@ class ClawMachine:
         self.mqtt_client.connect()
         self.esp_controller = MQTTEspController(self.mqtt_client)
 
+        # Der Player-Input-Controller schickt beim Panel nur noch die Tasten,
+        # die sich seit der letzten Nachricht geändert haben (Delta statt
+        # komplettem Zustand) — deshalb hier den vollständigen Zustand über
+        # mehrere Nachrichten hinweg mitführen, statt ihn pro Nachricht neu
+        # zu berechnen.
+        self.panel_button_state = {}
+
         self.setup_message_handlers()
         self.mqtt_client.publish(self.control_topic, "open")
 
@@ -104,30 +111,38 @@ class ClawMachine:
             #    Motor-Controller kennt aber nur X:/Y:/Z:/claw: — also hier uebersetzen.
             #    Keine Taste gedrueckt heisst losgelassen und damit X:0 (Stopp).
             case _ if topic == PLAYER_INPUT_PANEL_TOPIC:
+                # Kein match/case hier: das Panel schickt nur noch die Tasten,
+                # die sich seit der letzten Nachricht geändert haben (z.B. nur
+                # {"right":1}), nicht mehr den kompletten Zustand. Ein
+                # Mapping-Pattern wie `case {"right": 1}` würde außerdem schon
+                # matchen, sobald der Key "right" vorhanden ist — unabhängig
+                # von den anderen Keys — und X-/Y-Achse sind ohnehin zwei
+                # unabhängige Werte, keine einzelne Auswahl aus acht Optionen.
+                #
+                # Da nur Deltas ankommen, wird der Zustand hier über mehrere
+                # Nachrichten hinweg gemergt (self.panel_button_state) statt
+                # pro Nachricht neu berechnet — sonst würde z.B. eine reine
+                # {"grab":1}-Nachricht "right" fälschlich als losgelassen
+                # behandeln, nur weil sie es nicht erwähnt.
                 panel_buttons = json.loads(payload_text)
-                match panel_buttons:
-                    case {"right": 1}:
-                        motor_command = f"X:{-PANEL_MOTOR_SPEED}"
-                    case {"right":0}:
-                        motor_command = f"X:0"
-                    case {"left": 1}:
-                        motor_command = f"X:{PANEL_MOTOR_SPEED}"
-                    case {"left":0}:
-                        motor_command = f"X:0"
-                    case {"front": 1}:
-                        motor_command = f"Y:{-PANEL_MOTOR_SPEED}"
-                    case {"front":0}:
-                        motor_command = f"Y:0"
-                    case {"back": 1}:
-                        motor_command = f"Y:{PANEL_MOTOR_SPEED}"
-                    case {"back":0}:
-                        motor_command = f"Y:0"
-                    case _:
-                        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, "X:0")
-                        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, "Y:0")
-                if motor_command:
-                    self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, motor_command)
-                motor_command = None  # Reset for next message
+                self.panel_button_state.update(panel_buttons)
+
+                if self.panel_button_state.get("right"):
+                    x_speed = -PANEL_MOTOR_SPEED
+                elif self.panel_button_state.get("left"):
+                    x_speed = PANEL_MOTOR_SPEED
+                else:
+                    x_speed = 0
+
+                if self.panel_button_state.get("back"):
+                    y_speed = PANEL_MOTOR_SPEED
+                elif self.panel_button_state.get("front"):
+                    y_speed = -PANEL_MOTOR_SPEED
+                else:
+                    y_speed = 0
+
+                self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"X:{x_speed}")
+                self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"Y:{y_speed}")
 
             # 6) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
             #    Haupt-Steuertopic — unverändert an den Motor-Controller weiterleiten
