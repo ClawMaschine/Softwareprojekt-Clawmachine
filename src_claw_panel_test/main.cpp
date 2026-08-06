@@ -105,7 +105,7 @@ void loop()
   static unsigned long lastReadMs = 0;
   const unsigned long now = millis();
 
-  if (now - lastReadMs >= 100)
+  if (now - lastReadMs >= 10)
   {
     lastReadMs = now;
     panelInput.read();
