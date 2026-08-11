@@ -35,7 +35,7 @@ const KNOWN_DEVICES: Record<string, string> = {
 // ClawMqttConnection::ensureMqttConnected in claw_mqtt_connection.cpp) —
 // das Webinterface soll sich genau wie player_input als eigenes Gerät
 // mit Online/Offline-Status im Dashboard zeigen, nicht nur Befehle senden.
-const STATUS_TOPIC = 'clawmachine/web_interface/status';
+const STATUS_TOPIC = 'clawmachine/claw_web_interface/status';
 
 @Injectable({ providedIn: 'root' })
 export class MqttService implements OnDestroy {
@@ -77,10 +77,9 @@ export class MqttService implements OnDestroy {
       this.client!.publish(STATUS_TOPIC, 'online', { retain: true });
       this.client!.subscribe('clawmachine/+/status');
       this.client!.subscribe('clawmachine/+/metadata/uptime');
-      this.client!.subscribe('clawmachine/motor_controller/command');
-      this.client!.subscribe('clawmachine/web_interface/command');
-      this.client!.subscribe('clawmachine/player_input/joycon');
-      this.client!.subscribe('clawmachine/player_input/panel');
+      this.client!.subscribe('clawmachine/claw_motor_controller/command');
+      this.client!.subscribe('clawmachine/claw_web_interface/command');
+      this.client!.subscribe('clawmachine/claw_player_input/+');
     });
 
     this.client.on('message', (topic: string, payload: Buffer) => {
@@ -129,13 +128,13 @@ export class MqttService implements OnDestroy {
       if (!isNaN(ms)) {
         this.updateDevice(parts[1], { uptimeMs: ms, lastSeen: new Date() });
       }
-    } else if (topic === 'clawmachine/motor_controller/command') {
+    } else if (topic === 'clawmachine/claw_motor_controller/command') {
       this.appendLog(this.commandLog$, topic, payload);
-    } else if (topic === 'clawmachine/web_interface/command') {
+    } else if (topic === 'clawmachine/claw_web_interface/command') {
       this.appendLog(this.commandLog$, topic, payload);
     } else if (
-      topic === 'clawmachine/player_input/joycon' ||
-      topic === 'clawmachine/player_input/panel'
+      topic === 'clawmachine/claw_player_input/joycon' ||
+      topic === 'clawmachine/claw_player_input/panel'
     ) {
       this.appendLog(this.inputLog$, topic, payload);
     }
