@@ -1,316 +1,1143 @@
 #include <Arduino.h>
+#include <NimBLEDevice.h>
+
 #include <string.h>
 
-#include "esp_bt.h"
-#include "esp_bt_main.h"
-#include "esp_gap_ble_api.h"
-#include "esp_gattc_api.h"
-#include "nvs_flash.h"
-
 // ============================================================================
-// EXPERIMENTELL — ungetestet auf echter Hardware.
+// Stufe 1: Rohsignale eines Nintendo-Switch-2-Controllers abfangen.
 //
-// Nintendo-Switch-2-Controller (Joy-Con 2, Pro Controller 2, NSO-GameCube-
-// Controller) sprechen kein Standard-BLE-HID (HOGP) und auch kein normales
-// SMP-Pairing, sondern ein komplett proprietäres GATT-Protokoll mit eigenem
-// Pairing-Schema. Bluepad32 unterstützt sie (Stand jetzt) nicht.
+// Diese Firmware trifft BEWUSST KEINE ANNAHME darueber, welches Bit zu welcher
+// Taste gehoert. Sie verbindet sich mit dem Controller, abonniert dessen
+// Input-Reports und gibt aus, WELCHE BYTES UND BITS sich aendern. Die
+// Zuordnung "Bit -> physische Taste" entsteht durch Druecken und Ablesen und
+// wird anschliessend in docs/switch2_joycon_mapping.md festgehalten.
 //
-// Diese Firmware basiert auf der Reverse-Engineering-Dokumentation von
-// ndeadly: https://github.com/ndeadly/switch2_controller_research
+// Aus der Reverse-Engineering-Doku uebernommen sind nur die Dinge, die sich
+// nicht durch Druecken herausfinden lassen: UUIDs, Handles, das Prinzip der
+// 12-Bit-Stickpackung und die Regel "kein SMP-Pairing".
 //
-// Vereinfachungen gegenüber dem offiziellen Verbindungsaufbau:
-// - Kein offizielles Pairing (der AES-LTK-Handshake aus der Doku wird nicht
-//   durchgeführt) — laut Doku ist Pairing nur nötig, damit sich der
-//   Controller automatisch wieder mit der Switch verbindet bzw. sie aus dem
-//   Standby weckt. Für reines Auslesen von Eingaben reicht eine offene
-//   (unverschlüsselte) BLE-Verbindung.
-// - Es wird nur "Input Report 0x05" ausgelesen (Tasten + beide Analogsticks),
-//   weil dieser Report bei ALLEN Controllertypen unter denselben GATT-Handles
-//   erreichbar ist — kein Bedarf, Joy-Con/Pro/GameCube zu unterscheiden.
-// - Keine Bonding-Persistenz: nach einem Neustart muss neu verbunden werden.
+// Quellen:
+// - https://github.com/ndeadly/switch2_controller_research
+//   (bluetooth_interface.md, hid_reports.md, commands.md)
+// - https://gist.github.com/ndeadly/7d27aa63e2f653a902a2474dbcbc08b3
+// - https://qiita.com/Tsukusim/items/5a88b76a2e8e0e69e412
+//   (funktionierender NimBLE-Nachbau auf einem normalen ESP32)
 //
-// Unklar/nicht verifiziert: ob der Controller Notifications auf diesem
-// Report auch ohne die von der Doku dokumentierte Init-Befehlssequenz
-// (Feature-Flags etc. auf Handle 0x0016) tatsächlich sendet. Falls hier
-// nichts ankommt, ist das der erste Verdächtige.
+// Warum nicht Bluepad32: Switch-2-Controller sprechen kein Bluetooth Classic
+// HID mehr, sondern BLE mit einem proprietaeren GATT-Protokoll ohne HID over
+// GATT. Bluepad32 unterstuetzt ausschliesslich BR/EDR-Nintendo-Geraete.
+//
+// WICHTIG: Es darf niemals SMP-Pairing initiiert werden. Laut Doku trennt der
+// Controller die Verbindung sofort, wenn der Host das versucht. Deshalb
+// setSecurityAuth(false, false, false) und kein secureConnection().
+//
+// Serielle Kommandos zur Laufzeit (kein Neuflashen noetig):
+//   d = kompletten Hexdump jedes Reports an/aus
+//   r = Referenzwerte und Rauschliste zuruecksetzen (Controller ruhig halten)
+//   s = Stick-Dekodierung an/aus
+//   h = Hilfe
 // ============================================================================
 
-static const uint16_t NINTENDO_MANUFACTURER_ID = 0x0553;
-static const uint16_t NINTENDO_VENDOR_ID       = 0x057E;
-static const uint16_t SWITCH2_PRODUCT_ID_MIN   = 0x2060;
+// --- Protokollkonstanten (bluetooth_interface.md) ---------------------------
 
-// Input Report 0x05 (siehe hid_reports.md): Service ab7de9be-...-fd0,
-// Characteristic-Handle 0x000A, zugehöriger CCCD-Handle 0x000B.
-static const uint16_t INPUT_REPORT_HANDLE      = 0x000A;
-static const uint16_t INPUT_REPORT_CCCD_HANDLE = 0x000B;
+static constexpr uint16_t NINTENDO_MANUFACTURER_ID  = 0x0553;
+static constexpr uint16_t NINTENDO_VENDOR_ID        = 0x057E;
+static constexpr uint16_t SWITCH2_LOWEST_PRODUCT_ID = 0x2060;
 
-static esp_gatt_if_t     gattClientInterface = ESP_GATT_IF_NONE;
-static uint16_t          activeConnId        = 0;
-static bool              controllerFound     = false;
-static esp_bd_addr_t     controllerAddress   = {0};
-static esp_ble_addr_type_t controllerAddressType = BLE_ADDR_TYPE_PUBLIC;
+static constexpr size_t MANUFACTURER_DATA_MINIMUM_LENGTH  = 0x13;
+static constexpr size_t MANUFACTURER_DATA_VENDOR_OFFSET   = 0x05;
+static constexpr size_t MANUFACTURER_DATA_PRODUCT_OFFSET  = 0x07;
+static constexpr size_t MANUFACTURER_DATA_WAKE_FLAG_OFFSET = 0x0B;
+static constexpr size_t MANUFACTURER_DATA_HOST_ADDRESS_OFFSET = 0x0C;
+static constexpr size_t MANUFACTURER_DATA_HOST_ADDRESS_LENGTH = 6;
 
-static esp_ble_scan_params_t bleScanParameters = {
-    .scan_type = BLE_SCAN_TYPE_ACTIVE,
-    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
-    .scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL,
-    .scan_interval = 0x50,
-    .scan_window = 0x30,
-    .scan_duplicate = BLE_SCAN_DUPLICATE_DISABLE,
+// Service, unter dem alle Input-Reports haengen (GATT-Handles 0x0008-0x002a).
+static const char *SWITCH2_INPUT_SERVICE_UUID = "ab7de9be-89fe-49ad-828f-118f09df7fd0";
+
+// Input Report 0x05 auf Handle 0x000A - bei ALLEN Controllertypen vorhanden.
+static const char *COMMON_INPUT_REPORT_UUID = "ab7de9be-89fe-49ad-828f-118f09df7fd2";
+
+// --- Controllertyp-Erkennung ------------------------------------------------
+//
+// Nintendo stellt kein Typfeld bereit. Der Typ ergibt sich daraus, WELCHE
+// Characteristic auf Handle 0x000E existiert - die UUID ist pro Controllertyp
+// eindeutig. Genau deshalb koennen wir linken und rechten Joy-Con sauber
+// auseinanderhalten, obwohl sie im Advertisement nahezu identisch aussehen.
+
+enum class Switch2ControllerType
+{
+  Unknown,
+  JoyConLeft,
+  JoyConRight,
+  ProController,
+  GameCube
 };
 
-// --- Werbepaket-Erkennung ---------------------------------------------------
+// --- Tastenbelegung ---------------------------------------------------------
 //
-// Layout der Manufacturer-Specific-Data (siehe bluetooth_interface.md):
-// 0x0-0x1 Manufacturer-ID (immer 0x0553/Nintendo), 0x5-0x6 Vendor-ID
-// (0x057E), 0x7-0x8 Produkt-ID (Switch 2 ab 0x2060), 0xC-0x11 Host-Adresse
-// (nur bei "Standard"-Advertisement, also im Pairing-Modus, komplett 0x00 —
-// bei "Reconnection"/"Wake" steht dort die Adresse eines bereits gekoppelten
-// Hosts, den wollen wir hier nicht stören).
+// Die Belegung des RECHTEN Joy-Con ist vollstaendig selbst gemessen (siehe
+// docs/mapping.txt): alle zwoelf Bits, jedes einzelne deckungsgleich mit
+// ndeadlys hid_reports.md.
+//
+// Die Belegung des LINKEN Joy-Con stammt bisher nur aus der Dokumentation und
+// ist noch nicht am Geraet nachgeprueft. Sie wird deshalb beim Verbinden als
+// unbestaetigt gekennzeichnet.
 
-static bool isSwitch2ControllerAdvertisement(uint8_t *advData, uint8_t advDataLength)
+struct Switch2ButtonMapping
 {
-  uint8_t manufacturerDataLength = 0;
-  uint8_t *manufacturerData = esp_ble_resolve_adv_data(
-      advData,
-      ESP_BLE_AD_MANUFACTURER_SPECIFIC_TYPE,
-      &manufacturerDataLength);
+  uint8_t     byteOffset;
+  uint8_t     bitMask;
+  const char *buttonName;
+};
 
-  if (manufacturerData == nullptr || manufacturerDataLength < 0x13)
-  {
-    return false;
-  }
+// Report 0x08 - gemessen am Geraet
+static const Switch2ButtonMapping JOYCON_RIGHT_BUTTON_MAPPINGS[] = {
+    {0x02, 0x01, "B"},
+    {0x02, 0x02, "A"},
+    {0x02, 0x04, "Y"},
+    {0x02, 0x08, "X"},
+    {0x02, 0x10, "R"},
+    {0x02, 0x20, "ZR"},
+    {0x02, 0x40, "Plus"},
+    {0x02, 0x80, "Stick-Klick"},
+    {0x03, 0x01, "Home"},
+    {0x03, 0x10, "C"},
+    {0x03, 0x40, "SR"},
+    {0x03, 0x80, "SL"},
+};
 
-  uint16_t manufacturerId = manufacturerData[0] | (manufacturerData[1] << 8);
-  uint16_t vendorId       = manufacturerData[5] | (manufacturerData[6] << 8);
-  uint16_t productId      = manufacturerData[7] | (manufacturerData[8] << 8);
+// Report 0x07 - aus hid_reports.md, noch nicht am Geraet geprueft
+static const Switch2ButtonMapping JOYCON_LEFT_BUTTON_MAPPINGS[] = {
+    {0x02, 0x01, "Unten"},
+    {0x02, 0x02, "Rechts"},
+    {0x02, 0x04, "Links"},
+    {0x02, 0x08, "Oben"},
+    {0x02, 0x10, "L"},
+    {0x02, 0x20, "ZL"},
+    {0x02, 0x40, "Minus"},
+    {0x02, 0x80, "Stick-Klick"},
+    {0x03, 0x01, "Capture"},
+    {0x03, 0x40, "SR"},
+    {0x03, 0x80, "SL"},
+};
 
-  if (manufacturerId != NINTENDO_MANUFACTURER_ID ||
-      vendorId != NINTENDO_VENDOR_ID ||
-      productId < SWITCH2_PRODUCT_ID_MIN)
-  {
-    return false;
-  }
+#define ARRAY_ELEMENT_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 
-  for (int i = 0xC; i <= 0x11; i++)
-  {
-    if (manufacturerData[i] != 0x00)
-    {
-      return false; // Reconnection/Wake-Advertisement fuer einen anderen Host
-    }
-  }
+struct Switch2ReportDescription
+{
+  Switch2ControllerType type;
+  const char *characteristicUuid;
+  const char *controllerName;
+  const char *reportName;
+  uint8_t firstStickOffset;  // 0xFF = kein Stick an bekannter Position
+  uint8_t secondStickOffset;
+  const Switch2ButtonMapping *buttonMappings;  // nullptr = keine Belegung bekannt
+  size_t buttonMappingCount;
+  bool isButtonMappingVerified;
+};
 
-  return true;
-}
+static constexpr uint8_t NO_STICK_OFFSET = 0xFF;
 
-// --- Input Report 0x05 parsen ----------------------------------------------
+static const Switch2ReportDescription CONTROLLER_SPECIFIC_REPORTS[] = {
+    {Switch2ControllerType::JoyConLeft, "cc1bbbb5-7354-4d32-a716-a81cb241a32a",
+     "Joy-Con 2 (L)", "Report 0x07", 0x05, NO_STICK_OFFSET,
+     JOYCON_LEFT_BUTTON_MAPPINGS, ARRAY_ELEMENT_COUNT(JOYCON_LEFT_BUTTON_MAPPINGS), false},
+    {Switch2ControllerType::JoyConRight, "d5a9e01e-2ffc-4cca-b20c-8b67142bf442",
+     "Joy-Con 2 (R)", "Report 0x08", 0x05, NO_STICK_OFFSET,
+     JOYCON_RIGHT_BUTTON_MAPPINGS, ARRAY_ELEMENT_COUNT(JOYCON_RIGHT_BUTTON_MAPPINGS), true},
+    {Switch2ControllerType::ProController, "7492866c-ec3e-4619-8258-32755ffcc0f8",
+     "Pro Controller 2", "Report 0x09", 0x05, 0x08,
+     nullptr, 0, false},
+    {Switch2ControllerType::GameCube, "8261cba1-9435-420c-84d6-f0c75a2c8e4d",
+     "NSO GameCube Controller", "Report 0x0A", 0x05, NO_STICK_OFFSET,
+     nullptr, 0, false},
+};
+
+static constexpr size_t CONTROLLER_SPECIFIC_REPORT_COUNT =
+    sizeof(CONTROLLER_SPECIFIC_REPORTS) / sizeof(CONTROLLER_SPECIFIC_REPORTS[0]);
+
+// Report 0x05 fuehrt beide Sticks in einem gemeinsamen Feld (hid_reports.md).
+static constexpr uint8_t COMMON_REPORT_LEFT_STICK_OFFSET  = 0x0A;
+static constexpr uint8_t COMMON_REPORT_RIGHT_STICK_OFFSET = 0x0D;
+
+// --- Laufzeitschalter -------------------------------------------------------
+
+// Zusaetzlich zum controllerspezifischen Report auch den gemeinsamen Report
+// 0x05 abonnieren. War im Bring-up die Rueckfallebene fuer den Fall, dass der
+// typspezifische Report keine Daten liefert. Das ist widerlegt - beide Joy-Cons
+// liefern auf Handle 0x000E zuverlaessig. Bleibt als Schalter stehen, ist aber
+// aus, weil das Abo nur den Datenverkehr und die Konsolenausgabe verdoppelt.
+#define SUBSCRIBE_TO_COMMON_INPUT_REPORT 0
+
+static bool shouldPrintFullHexDump  = false;
+static bool shouldPrintStickValues  = true;
+// true = Klartextnamen, false = rohe Bytes und Bitmasken (zum Nachmessen)
+static bool shouldPrintButtonNames  = true;
+
+// --- Report-Verfolgung ------------------------------------------------------
 //
-// Siehe hid_reports.md#input-report-0x05. Sticks sind als gepackte 12-Bit-
-// Werte in je 3 Bytes kodiert (dasselbe Schema wie bei den originalen
-// Joy-Cons).
+// Pro abonnierter Characteristic wird der letzte Report aufgehoben und mit dem
+// naechsten verglichen. Bytes, die sich im Ruhezustand staendig aendern
+// (Zaehler, Motion-Daten, Stick-Jitter), werden in einer Lernphase automatisch
+// als Rauschen markiert und danach aus der Diff-Ausgabe ausgeblendet - sonst
+// waere die Konsole unbrauchbar. Der Vollhexdump ('d') zeigt trotzdem alles.
 
-struct StickValues
+static constexpr size_t   MAXIMUM_REPORT_LENGTH        = 64;
+static constexpr uint16_t NOISE_LEARNING_SAMPLE_COUNT  = 100;
+static constexpr uint8_t  NOISE_CHANGE_PERCENT_THRESHOLD = 25;
+
+// Stick-Auswertung. Die Vollauslenkung ist aus eigenen Messungen abgeleitet:
+// gemessen wurden 1176 (rechts), 1196 (links), 1244 (oben), 1155 (unten)
+// Zaehlwerte ab Ruhelage. 1150 liegt knapp darunter, damit jede Richtung
+// sicher 100 % erreicht; darueber wird begrenzt.
+static constexpr int16_t STICK_FULL_DEFLECTION_COUNTS = 1150;
+static constexpr int8_t  STICK_DEADZONE_PERCENT       = 10;
+static constexpr int8_t  STICK_PRINT_STEP_PERCENT     = 5;
+
+struct StickPosition
 {
   uint16_t x;
   uint16_t y;
 };
 
-static StickValues unpackStick(const uint8_t *bytes)
+// Vorzeichenbehaftete Auslenkung in Prozent. Positiv = rechts bzw. oben.
+// Die Achsenrichtung ist am Geraet gemessen: steigendes X = rechts,
+// steigendes Y = oben.
+struct StickDeflection
 {
-  StickValues stick;
-  stick.x = bytes[0] | ((bytes[1] & 0x0F) << 8);
-  stick.y = (bytes[1] >> 4) | (bytes[2] << 4);
+  int8_t horizontalPercent;
+  int8_t verticalPercent;
+};
+
+struct ReportTracker
+{
+  const char *controllerName;
+  const char *reportName;
+  uint8_t firstStickOffset;
+  uint8_t secondStickOffset;
+
+  const Switch2ButtonMapping *buttonMappings;
+  size_t                      buttonMappingCount;
+
+  uint8_t previousReport[MAXIMUM_REPORT_LENGTH];
+  size_t  previousReportLength;
+  bool    hasPreviousReport;
+
+  uint16_t learningSampleCount;
+  uint16_t byteChangeCount[MAXIMUM_REPORT_LENGTH];
+  bool     isNoisyByte[MAXIMUM_REPORT_LENGTH];
+  bool     isNoiseLearned;
+
+  // Mittellage wird waehrend derselben Lernphase mitgemittelt, in der auch das
+  // Rauschen bestimmt wird. Die Ruhelage liegt geraeteabhaengig deutlich neben
+  // den theoretischen 0x800 (gemessen: 0x860 / 0x788) und darf deshalb nicht
+  // angenommen werden.
+  uint32_t      stickCenterSumX;
+  uint32_t      stickCenterSumY;
+  uint16_t      stickCenterSampleCount;
+  StickPosition stickCenter;
+  bool          hasStickCenter;
+
+  StickDeflection lastPrintedDeflection;
+  bool            hasPrintedDeflection;
+
+  uint32_t receivedReportCount;
+};
+
+static void resetReportTracker(ReportTracker &tracker)
+{
+  tracker.previousReportLength   = 0;
+  tracker.hasPreviousReport      = false;
+  tracker.learningSampleCount    = 0;
+  tracker.isNoiseLearned         = false;
+  tracker.stickCenterSumX        = 0;
+  tracker.stickCenterSumY        = 0;
+  tracker.stickCenterSampleCount = 0;
+  tracker.hasStickCenter         = false;
+  tracker.hasPrintedDeflection   = false;
+  tracker.receivedReportCount    = 0;
+  memset(tracker.byteChangeCount, 0, sizeof(tracker.byteChangeCount));
+  memset(tracker.isNoisyByte, 0, sizeof(tracker.isNoisyByte));
+}
+
+// --- Verbindungsverwaltung --------------------------------------------------
+
+static constexpr size_t MAXIMUM_CONTROLLER_SESSIONS = 3;
+
+struct ControllerSession
+{
+  bool                  isInUse;
+  NimBLEAddress         address;
+  Switch2ControllerType type;
+  ReportTracker         specificReportTracker;
+  ReportTracker         commonReportTracker;
+};
+
+static ControllerSession controllerSessions[MAXIMUM_CONTROLLER_SESSIONS];
+
+// --- Backoff und Log-Drosselung ---------------------------------------------
+//
+// Ohne Backoff wuerde nach jedem Fehlschlag sofort neu verbunden. Das ueber-
+// flutet nicht nur den UART, sondern loest laut Praxisberichten genau den
+// Cooldown aus, der den Controller minutenlang gar nicht mehr reagieren
+// laesst. Ebenso wird jedes Advertisement desselben Geraets nur noch alle paar
+// Sekunden geloggt.
+
+static constexpr size_t   MAXIMUM_TRACKED_DEVICES         = 4;
+static constexpr uint32_t CONNECT_RETRY_BASE_DELAY_MS     = 5000;
+static constexpr uint32_t CONNECT_RETRY_MAXIMUM_DELAY_MS  = 30000;
+static constexpr uint32_t SCAN_LOG_INTERVAL_MS            = 5000;
+
+struct DeviceRecord
+{
+  bool          isInUse;
+  NimBLEAddress address;
+  uint8_t       failedConnectCount;
+  uint32_t      nextConnectAllowedAtMs;
+  uint32_t      lastScanLogAtMs;
+  bool          hasLoggedOnce;
+};
+
+static DeviceRecord deviceRecords[MAXIMUM_TRACKED_DEVICES];
+
+static DeviceRecord *findOrCreateDeviceRecord(const NimBLEAddress &address)
+{
+  for (size_t i = 0; i < MAXIMUM_TRACKED_DEVICES; i++)
+  {
+    if (deviceRecords[i].isInUse && deviceRecords[i].address == address)
+    {
+      return &deviceRecords[i];
+    }
+  }
+  for (size_t i = 0; i < MAXIMUM_TRACKED_DEVICES; i++)
+  {
+    if (!deviceRecords[i].isInUse)
+    {
+      deviceRecords[i].isInUse                = true;
+      deviceRecords[i].address                = address;
+      deviceRecords[i].failedConnectCount     = 0;
+      deviceRecords[i].nextConnectAllowedAtMs = 0;
+      deviceRecords[i].lastScanLogAtMs        = 0;
+      deviceRecords[i].hasLoggedOnce          = false;
+      return &deviceRecords[i];
+    }
+  }
+  return nullptr;
+}
+
+// Wird im NimBLE-Host-Task gesetzt und im Arduino-Task ausgewertet. Ein
+// einzelner Slot genuegt: Controller senden ihre Advertisements wiederholt,
+// ein verpasster Fund kommt im naechsten Intervall erneut.
+static NimBLEAddress   pendingConnectAddress;
+static volatile bool   hasPendingConnectAddress = false;
+
+static ControllerSession *findSessionByAddress(const NimBLEAddress &address)
+{
+  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
+  {
+    if (controllerSessions[i].isInUse && controllerSessions[i].address == address)
+    {
+      return &controllerSessions[i];
+    }
+  }
+  return nullptr;
+}
+
+static ControllerSession *claimFreeSession(const NimBLEAddress &address)
+{
+  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
+  {
+    if (!controllerSessions[i].isInUse)
+    {
+      controllerSessions[i].isInUse = true;
+      controllerSessions[i].address = address;
+      controllerSessions[i].type    = Switch2ControllerType::Unknown;
+      resetReportTracker(controllerSessions[i].specificReportTracker);
+      resetReportTracker(controllerSessions[i].commonReportTracker);
+      return &controllerSessions[i];
+    }
+  }
+  return nullptr;
+}
+
+// --- Hilfsfunktionen --------------------------------------------------------
+
+static void printHexBytes(const uint8_t *bytes, size_t length)
+{
+  for (size_t i = 0; i < length; i++)
+  {
+    Serial.printf("%02X", bytes[i]);
+    if ((i % 8) == 7 && i + 1 < length)
+    {
+      Serial.print(' ');
+    }
+  }
+}
+
+// Sticks sind als zwei 12-Bit-Werte in drei Bytes gepackt, Ruhelage 0x800.
+// Gleiches Schema wie bei den Switch-1-Joy-Cons.
+static StickPosition unpackPackedStickValues(const uint8_t *bytes)
+{
+  StickPosition stick;
+  stick.x = static_cast<uint16_t>(bytes[0] | ((bytes[1] & 0x0F) << 8));
+  stick.y = static_cast<uint16_t>((bytes[1] >> 4) | (bytes[2] << 4));
   return stick;
 }
 
-static void printInputReport05(const uint8_t *data, uint16_t length)
+// Die drei Bytes eines Sticks gehoeren nicht in die Diff-Ausgabe: sie werden
+// separat als [STICK] dekodiert. Der Rauschfilter allein reicht dafuer nicht,
+// weil das dritte Byte (obere Y-Bits) im Ruhezustand stabil bleibt und sich
+// erst bei Bewegung aendert - es sahe sonst wie ein Tastendruck aus.
+static bool isPartOfKnownStickField(const ReportTracker &tracker, size_t byteIndex)
 {
-  if (length < 0x10)
+  if (tracker.firstStickOffset != NO_STICK_OFFSET &&
+      byteIndex >= tracker.firstStickOffset &&
+      byteIndex < static_cast<size_t>(tracker.firstStickOffset) + 3)
   {
-    Serial.printf("[SWITCH2] Report zu kurz (%u Bytes)\n", length);
-    return;
+    return true;
   }
-
-  uint32_t buttons =
-      data[0x4] | (data[0x5] << 8) | (data[0x6] << 16) | (static_cast<uint32_t>(data[0x7]) << 24);
-
-  StickValues leftStick  = unpackStick(&data[0xA]);
-  StickValues rightStick = unpackStick(&data[0xD]);
-
-  Serial.printf(
-      "[SWITCH2] buttons=0x%08lX leftStick=(%u,%u) rightStick=(%u,%u)\n",
-      static_cast<unsigned long>(buttons),
-      leftStick.x, leftStick.y,
-      rightStick.x, rightStick.y);
+  if (tracker.secondStickOffset != NO_STICK_OFFSET &&
+      byteIndex >= tracker.secondStickOffset &&
+      byteIndex < static_cast<size_t>(tracker.secondStickOffset) + 3)
+  {
+    return true;
+  }
+  return false;
 }
 
-// --- GAP (Scannen + Verbindungsaufbau) --------------------------------------
-
-static void onBleGapEvent(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
+// Rohwert einer Achse in vorzeichenbehaftete Prozent umrechnen, begrenzt auf
+// -100..+100. Positiv = rechts bzw. oben.
+static int8_t convertAxisToPercent(uint16_t rawValue, uint16_t centerValue)
 {
-  if (event == ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT)
+  const int32_t deflection = static_cast<int32_t>(rawValue) - static_cast<int32_t>(centerValue);
+  int32_t percent = (deflection * 100) / STICK_FULL_DEFLECTION_COUNTS;
+  if (percent > 100)
   {
-    esp_ble_gap_start_scanning(30);
-    return;
+    percent = 100;
   }
-
-  if (event != ESP_GAP_BLE_SCAN_RESULT_EVT)
+  if (percent < -100)
   {
-    return;
+    percent = -100;
   }
+  return static_cast<int8_t>(percent);
+}
 
-  if (param->scan_rst.search_evt == ESP_GAP_SEARCH_INQ_CMPL_EVT)
+static bool isInsideDeadzone(int8_t percent)
+{
+  return percent > -STICK_DEADZONE_PERCENT && percent < STICK_DEADZONE_PERCENT;
+}
+
+static void printLearnedNoiseBytes(const ReportTracker &tracker)
+{
+  Serial.printf("[BASE]  %s / %s: Referenz gesetzt. Ignorierte Rausch-Bytes:",
+                tracker.controllerName, tracker.reportName);
+
+  bool hasAnyNoisyByte = false;
+  for (size_t i = 0; i < tracker.previousReportLength; i++)
   {
-    if (!controllerFound)
+    if (tracker.isNoisyByte[i])
     {
-      esp_ble_gap_start_scanning(30); // Nichts gefunden -> weiterscannen
+      Serial.printf(" 0x%02X", static_cast<unsigned>(i));
+      hasAnyNoisyByte = true;
+    }
+  }
+  if (!hasAnyNoisyByte)
+  {
+    Serial.print(" keine");
+  }
+  Serial.println();
+  Serial.printf("[BASE]  %s: Stick-Mitte gemessen bei x=0x%03X y=0x%03X\n",
+                tracker.controllerName, tracker.stickCenter.x, tracker.stickCenter.y);
+  Serial.println("[BASE]  Bitte jetzt Tasten einzeln druecken.");
+}
+
+// Stick als Richtung und prozentuale Auslenkung ausgeben. In der Mittellage
+// wird bewusst gar nichts ausgegeben.
+static void printStickDeflection(ReportTracker &tracker, const uint8_t *report, size_t length)
+{
+  if (!shouldPrintStickValues || tracker.firstStickOffset == NO_STICK_OFFSET ||
+      !tracker.hasStickCenter)
+  {
+    return;
+  }
+  if (static_cast<size_t>(tracker.firstStickOffset) + 3 > length)
+  {
+    return;
+  }
+
+  const StickPosition raw = unpackPackedStickValues(&report[tracker.firstStickOffset]);
+
+  StickDeflection deflection;
+  deflection.horizontalPercent = convertAxisToPercent(raw.x, tracker.stickCenter.x);
+  deflection.verticalPercent   = convertAxisToPercent(raw.y, tracker.stickCenter.y);
+
+  const bool isHorizontalIdle = isInsideDeadzone(deflection.horizontalPercent);
+  const bool isVerticalIdle   = isInsideDeadzone(deflection.verticalPercent);
+
+  if (isHorizontalIdle && isVerticalIdle)
+  {
+    // Mittellage: nichts ausgeben. Merker zuruecksetzen, damit die naechste
+    // Auslenkung sofort wieder eine Zeile erzeugt.
+    tracker.hasPrintedDeflection = false;
+    return;
+  }
+
+  // Drosselung: bei ~30 Reports/s wuerde sonst jede Zitterbewegung eine Zeile
+  // erzeugen. Neu ausgegeben wird erst ab einer spuerbaren Aenderung.
+  if (tracker.hasPrintedDeflection)
+  {
+    const int16_t horizontalChange =
+        abs(deflection.horizontalPercent - tracker.lastPrintedDeflection.horizontalPercent);
+    const int16_t verticalChange =
+        abs(deflection.verticalPercent - tracker.lastPrintedDeflection.verticalPercent);
+
+    if (horizontalChange < STICK_PRINT_STEP_PERCENT && verticalChange < STICK_PRINT_STEP_PERCENT)
+    {
+      return;
+    }
+  }
+
+  Serial.printf("[STICK] %s:", tracker.controllerName);
+  if (!isHorizontalIdle)
+  {
+    Serial.printf(" %s %d%%",
+                  deflection.horizontalPercent > 0 ? "rechts" : "links",
+                  abs(deflection.horizontalPercent));
+  }
+  if (!isVerticalIdle)
+  {
+    Serial.printf(" %s %d%%",
+                  deflection.verticalPercent > 0 ? "oben" : "unten",
+                  abs(deflection.verticalPercent));
+  }
+  Serial.println();
+
+  tracker.lastPrintedDeflection = deflection;
+  tracker.hasPrintedDeflection  = true;
+}
+
+// --- Kernstueck: Report vergleichen und Aenderungen ausgeben ----------------
+
+static void handleIncomingReport(ReportTracker &tracker, const uint8_t *report, size_t length)
+{
+  const size_t usableLength = length > MAXIMUM_REPORT_LENGTH ? MAXIMUM_REPORT_LENGTH : length;
+  tracker.receivedReportCount++;
+
+  if (shouldPrintFullHexDump)
+  {
+    Serial.printf("[RAW]   %s / %s (%u Bytes): ",
+                  tracker.controllerName, tracker.reportName, static_cast<unsigned>(length));
+    printHexBytes(report, usableLength);
+    Serial.println();
+  }
+
+  if (!tracker.hasPreviousReport)
+  {
+    memcpy(tracker.previousReport, report, usableLength);
+    tracker.previousReportLength = usableLength;
+    tracker.hasPreviousReport    = true;
+    Serial.printf("[BASE]  %s / %s: erster Report empfangen (%u Bytes), lerne Rauschen...\n",
+                  tracker.controllerName, tracker.reportName, static_cast<unsigned>(length));
+    return;
+  }
+
+  // Lernphase: zaehlen, welche Bytes sich im Ruhezustand staendig aendern.
+  if (!tracker.isNoiseLearned)
+  {
+    for (size_t i = 0; i < usableLength && i < tracker.previousReportLength; i++)
+    {
+      if (report[i] != tracker.previousReport[i])
+      {
+        tracker.byteChangeCount[i]++;
+      }
+    }
+
+    // Dieselben Stichproben liefern die Stick-Mittellage. Der Controller liegt
+    // in dieser Phase ruhig, also ist der Mittelwert genau die Ruhelage.
+    if (tracker.firstStickOffset != NO_STICK_OFFSET &&
+        static_cast<size_t>(tracker.firstStickOffset) + 3 <= usableLength)
+    {
+      const StickPosition raw = unpackPackedStickValues(&report[tracker.firstStickOffset]);
+      tracker.stickCenterSumX += raw.x;
+      tracker.stickCenterSumY += raw.y;
+      tracker.stickCenterSampleCount++;
+    }
+
+    tracker.learningSampleCount++;
+    memcpy(tracker.previousReport, report, usableLength);
+    tracker.previousReportLength = usableLength;
+
+    if (tracker.learningSampleCount >= NOISE_LEARNING_SAMPLE_COUNT)
+    {
+      for (size_t i = 0; i < tracker.previousReportLength; i++)
+      {
+        const uint32_t changePercent =
+            (static_cast<uint32_t>(tracker.byteChangeCount[i]) * 100) / tracker.learningSampleCount;
+        tracker.isNoisyByte[i] = changePercent >= NOISE_CHANGE_PERCENT_THRESHOLD;
+      }
+
+      if (tracker.stickCenterSampleCount > 0)
+      {
+        tracker.stickCenter.x =
+            static_cast<uint16_t>(tracker.stickCenterSumX / tracker.stickCenterSampleCount);
+        tracker.stickCenter.y =
+            static_cast<uint16_t>(tracker.stickCenterSumY / tracker.stickCenterSampleCount);
+        tracker.hasStickCenter = true;
+      }
+
+      tracker.isNoiseLearned = true;
+      printLearnedNoiseBytes(tracker);
     }
     return;
   }
 
-  if (param->scan_rst.search_evt != ESP_GAP_SEARCH_INQ_RES_EVT || controllerFound)
+  // Auswertephase: nur noch die nicht-rauschenden Bytes melden.
+  for (size_t i = 0; i < usableLength && i < tracker.previousReportLength; i++)
   {
-    return;
+    const uint8_t previousValue = tracker.previousReport[i];
+    const uint8_t currentValue  = report[i];
+
+    if (currentValue == previousValue || tracker.isNoisyByte[i] ||
+        isPartOfKnownStickField(tracker, i))
+    {
+      continue;
+    }
+
+    uint8_t changedBits = static_cast<uint8_t>(previousValue ^ currentValue);
+
+    // Bekannte Bits als Klartextnamen melden und aus der Restmaske entfernen.
+    if (shouldPrintButtonNames && tracker.buttonMappings != nullptr)
+    {
+      for (size_t m = 0; m < tracker.buttonMappingCount; m++)
+      {
+        const Switch2ButtonMapping &mapping = tracker.buttonMappings[m];
+        if (mapping.byteOffset != i || (changedBits & mapping.bitMask) == 0)
+        {
+          continue;
+        }
+
+        Serial.printf("[BTN]   %s: %s %s\n",
+                      tracker.controllerName,
+                      mapping.buttonName,
+                      (currentValue & mapping.bitMask) != 0 ? "gedrueckt" : "losgelassen");
+        changedBits = static_cast<uint8_t>(changedBits & ~mapping.bitMask);
+      }
+    }
+
+    if (changedBits == 0)
+    {
+      continue;
+    }
+
+    // Was uebrig bleibt, ist entweder nicht zugeordnet oder die Klartextausgabe
+    // ist abgeschaltet. In beiden Faellen roh melden - ein unbekanntes Signal
+    // darf nicht stillschweigend verschwinden.
+    const uint8_t setBits     = static_cast<uint8_t>(changedBits & currentValue);
+    const uint8_t clearedBits = static_cast<uint8_t>(changedBits & previousValue);
+
+    Serial.printf("[DIFF]  %s / %s: byte 0x%02X: 0x%02X -> 0x%02X",
+                  tracker.controllerName, tracker.reportName,
+                  static_cast<unsigned>(i), previousValue, currentValue);
+    if (setBits != 0)
+    {
+      Serial.printf("   bits gesetzt: 0x%02X", setBits);
+    }
+    if (clearedBits != 0)
+    {
+      Serial.printf("   bits geloescht: 0x%02X", clearedBits);
+    }
+    Serial.println();
   }
 
-  if (!isSwitch2ControllerAdvertisement(param->scan_rst.ble_adv, param->scan_rst.adv_data_len))
-  {
-    return;
-  }
+  printStickDeflection(tracker, report, usableLength);
 
-  controllerFound = true;
-  memcpy(controllerAddress, param->scan_rst.bda, sizeof(esp_bd_addr_t));
-  controllerAddressType = param->scan_rst.ble_addr_type;
-
-  Serial.print("[SWITCH2] Controller gefunden: ");
-  for (int i = 0; i < 6; i++)
-  {
-    Serial.printf("%02X%s", controllerAddress[i], i < 5 ? ":" : "\n");
-  }
-
-  esp_ble_gap_stop_scanning();
-  esp_ble_gattc_open(gattClientInterface, controllerAddress, controllerAddressType, true);
+  memcpy(tracker.previousReport, report, usableLength);
+  tracker.previousReportLength = usableLength;
 }
 
-// --- GATT-Client -------------------------------------------------------------
+// --- GATT-Baum ausgeben -----------------------------------------------------
+//
+// Pflicht, kein Luxus: laut Praxisberichten weichen die Characteristic-UUIDs
+// zwischen Exemplaren ab, und bei Pro Controllern mit Headset-Firmware
+// verschieben sich die Standard-Handles um +8.
 
-static void onGattcEvent(esp_gattc_cb_event_t event, esp_gatt_if_t gattcInterface, esp_ble_gattc_cb_param_t *param)
+static void printGattTree(NimBLEClient *client)
 {
-  switch (event)
+  const std::vector<NimBLERemoteService *> &services = client->getServices(true);
+
+  Serial.printf("[GATT]  %u Services gefunden\n", static_cast<unsigned>(services.size()));
+
+  for (NimBLERemoteService *service : services)
   {
-    case ESP_GATTC_REG_EVT:
-      gattClientInterface = gattcInterface;
-      break;
+    Serial.printf("[GATT]  Service %s  (0x%04X-0x%04X)\n",
+                  service->getUUID().toString().c_str(),
+                  service->getStartHandle(),
+                  service->getEndHandle());
 
-    case ESP_GATTC_CONNECT_EVT:
-      activeConnId = param->connect.conn_id;
-      Serial.println("[SWITCH2] BLE-Verbindung aufgebaut...");
-      break;
-
-    case ESP_GATTC_OPEN_EVT:
-      if (param->open.status != ESP_GATT_OK)
-      {
-        Serial.printf("[SWITCH2] Verbindung fehlgeschlagen: 0x%02x\n", param->open.status);
-        controllerFound = false;
-        esp_ble_gap_start_scanning(30);
-        return;
-      }
-
-      Serial.println("[SWITCH2] Verbunden. Aktiviere Input-Report-Notifications...");
-      // Lokale Registrierung, damit ESP_GATTC_NOTIFY_EVT ueberhaupt ausgeloest wird.
-      esp_ble_gattc_register_for_notify(gattcInterface, controllerAddress, INPUT_REPORT_HANDLE);
-      break;
-
-    case ESP_GATTC_REG_FOR_NOTIFY_EVT:
+    for (NimBLERemoteCharacteristic *characteristic : service->getCharacteristics(true))
     {
-      if (param->reg_for_notify.status != ESP_GATT_OK)
+      Serial.printf("[GATT]    Char %s  handle=0x%04X  ",
+                    characteristic->getUUID().toString().c_str(),
+                    characteristic->getHandle());
+      if (characteristic->canRead())            Serial.print("READ ");
+      if (characteristic->canWrite())           Serial.print("WRITE ");
+      if (characteristic->canWriteNoResponse()) Serial.print("WRITE_NR ");
+      if (characteristic->canNotify())          Serial.print("NOTIFY ");
+      if (characteristic->canIndicate())        Serial.print("INDICATE ");
+      Serial.println();
+    }
+  }
+}
+
+// --- Abonnieren -------------------------------------------------------------
+
+static bool subscribeToReport(NimBLERemoteService         *service,
+                              const char                  *characteristicUuid,
+                              ReportTracker               &tracker,
+                              const char                  *controllerName,
+                              const char                  *reportName,
+                              uint8_t                      firstStickOffset,
+                              uint8_t                      secondStickOffset,
+                              const Switch2ButtonMapping  *buttonMappings,
+                              size_t                       buttonMappingCount)
+{
+  NimBLERemoteCharacteristic *characteristic = service->getCharacteristic(characteristicUuid);
+  if (characteristic == nullptr)
+  {
+    return false;
+  }
+  if (!characteristic->canNotify())
+  {
+    Serial.printf("[SUB]   %s: Characteristic %s kann keine Notifications\n",
+                  reportName, characteristicUuid);
+    return false;
+  }
+
+  tracker.controllerName     = controllerName;
+  tracker.reportName         = reportName;
+  tracker.firstStickOffset   = firstStickOffset;
+  tracker.secondStickOffset  = secondStickOffset;
+  tracker.buttonMappings     = buttonMappings;
+  tracker.buttonMappingCount = buttonMappingCount;
+  resetReportTracker(tracker);
+
+  ReportTracker *trackerPointer = &tracker;
+  const bool didSubscribe = characteristic->subscribe(
+      true,
+      [trackerPointer](NimBLERemoteCharacteristic *, uint8_t *data, size_t length, bool)
       {
-        Serial.printf("[SWITCH2] Notify-Registrierung fehlgeschlagen: 0x%02x\n", param->reg_for_notify.status);
+        handleIncomingReport(*trackerPointer, data, length);
+      });
+
+  if (!didSubscribe)
+  {
+    Serial.printf("[SUB]   %s: subscribe() fehlgeschlagen\n", reportName);
+    return false;
+  }
+
+  Serial.printf("[SUB]   Abonniert: %s auf handle 0x%04X\n",
+                reportName, characteristic->getHandle());
+  return true;
+}
+
+// --- Verbindungsaufbau ------------------------------------------------------
+
+class Switch2ClientCallbacks : public NimBLEClientCallbacks
+{
+  void onConnect(NimBLEClient *client) override
+  {
+    Serial.printf("[CONN]  Verbunden mit %s\n", client->getPeerAddress().toString().c_str());
+  }
+
+  // Aufraeumen und Backoff passieren im loop()-Pfad, sobald connect() false
+  // zurueckgibt. Hier wird nur geloggt, sonst wuerde beides doppelt laufen.
+  void onConnectFail(NimBLEClient *client, int reason) override
+  {
+    Serial.printf("[CONN]  Verbindung zu %s fehlgeschlagen (reason=%d%s)\n",
+                  client->getPeerAddress().toString().c_str(), reason,
+                  reason == 574 ? " = HCI 0x3E, Verbindungsaufbau abgelehnt" : "");
+  }
+
+  void onDisconnect(NimBLEClient *client, int reason) override
+  {
+    Serial.printf("[CONN]  Getrennt von %s (reason=%d), scanne erneut...\n",
+                  client->getPeerAddress().toString().c_str(), reason);
+
+    ControllerSession *session = findSessionByAddress(client->getPeerAddress());
+    if (session != nullptr)
+    {
+      session->isInUse = false;
+    }
+    NimBLEDevice::getScan()->start(0, false, true);
+  }
+};
+
+static Switch2ClientCallbacks clientCallbacks;
+
+static void connectToController(const NimBLEAddress &address)
+{
+  if (findSessionByAddress(address) != nullptr)
+  {
+    return;
+  }
+
+  ControllerSession *session = claimFreeSession(address);
+  if (session == nullptr)
+  {
+    Serial.println("[CONN]  Keine freie Session mehr - Verbindung uebersprungen");
+    return;
+  }
+
+  Serial.printf("[CONN]  Verbinde mit %s ...\n", address.toString().c_str());
+
+  NimBLEClient *client = NimBLEDevice::createClient(address);
+  if (client == nullptr)
+  {
+    Serial.println("[CONN]  createClient() fehlgeschlagen");
+    session->isInUse = false;
+    return;
+  }
+
+  client->setClientCallbacks(&clientCallbacks, false);
+  // Nur bei Trennung selbst loeschen. Bei Verbindungsfehler NICHT - sonst
+  // waere der Client bereits weg, wenn wir gleich getLastError() abfragen.
+  client->setSelfDelete(true, false);
+  client->setConnectTimeout(10000);
+  client->setConnectRetries(1);
+  // 15-30 ms Verbindungsintervall. Die Konsole nutzt 5 ms, das liegt unter dem
+  // BLE-Minimum von 7,5 ms und ist mit ESP32 nicht erreichbar.
+  client->setConnectionParams(12, 24, 0, 400);
+
+  // Letzter Parameter erzwingt den MTU-Exchange. Ohne ihn bliebe die MTU bei
+  // 23 und Notifications waeren auf 20 Bytes gekuerzt - die Reports sind bis
+  // zu 63 Bytes lang.
+  if (!client->connect(address, true, false, true))
+  {
+    Serial.printf("[CONN]  connect() fehlgeschlagen (lastError=%d)\n", client->getLastError());
+    session->isInUse = false;
+    NimBLEDevice::deleteClient(client);
+
+    DeviceRecord *record = findOrCreateDeviceRecord(address);
+    if (record != nullptr)
+    {
+      if (record->failedConnectCount < 255)
+      {
+        record->failedConnectCount++;
+      }
+      uint32_t retryDelayMs = CONNECT_RETRY_BASE_DELAY_MS * record->failedConnectCount;
+      if (retryDelayMs > CONNECT_RETRY_MAXIMUM_DELAY_MS)
+      {
+        retryDelayMs = CONNECT_RETRY_MAXIMUM_DELAY_MS;
+      }
+      record->nextConnectAllowedAtMs = millis() + retryDelayMs;
+
+      Serial.printf("[CONN]  Naechster Versuch fruehestens in %u s (Fehlversuch %u).\n",
+                    static_cast<unsigned>(retryDelayMs / 1000),
+                    static_cast<unsigned>(record->failedConnectCount));
+      Serial.println("[CONN]  Sync-Taste erneut lang druecken hebt die Wartezeit sofort auf.");
+    }
+
+    NimBLEDevice::getScan()->start(0, false, true);
+    return;
+  }
+
+  Serial.printf("[CONN]  Verbunden. MTU=%u\n", client->getMTU());
+
+  DeviceRecord *record = findOrCreateDeviceRecord(address);
+  if (record != nullptr)
+  {
+    record->failedConnectCount     = 0;
+    record->nextConnectAllowedAtMs = 0;
+  }
+
+  printGattTree(client);
+
+  NimBLERemoteService *inputService = client->getService(SWITCH2_INPUT_SERVICE_UUID);
+  if (inputService == nullptr)
+  {
+    Serial.printf("[TYPE]  Service %s nicht gefunden - kein Switch-2-Controller?\n",
+                  SWITCH2_INPUT_SERVICE_UUID);
+    client->disconnect();
+    return;
+  }
+
+  // Typerkennung: die erste existierende der vier UUIDs bestimmt Typ UND Parser.
+  const Switch2ReportDescription *matchedReport = nullptr;
+  for (size_t i = 0; i < CONTROLLER_SPECIFIC_REPORT_COUNT; i++)
+  {
+    if (inputService->getCharacteristic(CONTROLLER_SPECIFIC_REPORTS[i].characteristicUuid) != nullptr)
+    {
+      matchedReport = &CONTROLLER_SPECIFIC_REPORTS[i];
+      break;
+    }
+  }
+
+  if (matchedReport != nullptr)
+  {
+    session->type = matchedReport->type;
+    Serial.printf("[TYPE]  Erkannt: %s  -> %s\n",
+                  matchedReport->controllerName, matchedReport->reportName);
+
+    if (matchedReport->buttonMappings != nullptr && !matchedReport->isButtonMappingVerified)
+    {
+      Serial.printf("[TYPE]  ACHTUNG: Tastenbelegung fuer %s stammt aus der Doku und ist\n",
+                    matchedReport->controllerName);
+      Serial.println("[TYPE]  noch nicht am Geraet nachgeprueft. Namen koennen falsch sein.");
+      Serial.println("[TYPE]  Mit 'b' auf rohe Bitmasken umschalten zum Nachmessen.");
+    }
+
+    subscribeToReport(inputService,
+                      matchedReport->characteristicUuid,
+                      session->specificReportTracker,
+                      matchedReport->controllerName,
+                      matchedReport->reportName,
+                      matchedReport->firstStickOffset,
+                      matchedReport->secondStickOffset,
+                      matchedReport->buttonMappings,
+                      matchedReport->buttonMappingCount);
+  }
+  else
+  {
+    Serial.println("[TYPE]  Kein bekannter typspezifischer Report gefunden.");
+    Serial.println("[TYPE]  Bitte den GATT-Dump oben mit hid_reports.md abgleichen.");
+  }
+
+#if SUBSCRIBE_TO_COMMON_INPUT_REPORT
+  subscribeToReport(inputService,
+                    COMMON_INPUT_REPORT_UUID,
+                    session->commonReportTracker,
+                    matchedReport != nullptr ? matchedReport->controllerName : "Unbekannt",
+                    "Report 0x05",
+                    COMMON_REPORT_LEFT_STICK_OFFSET,
+                    COMMON_REPORT_RIGHT_STICK_OFFSET,
+                    nullptr,  // Report 0x05 hat ein eigenes Button-Layout, nicht gemessen
+                    0);
+#endif
+
+  // Weiterscannen, damit der zweite Joy-Con gefunden wird.
+  NimBLEDevice::getScan()->start(0, false, true);
+}
+
+// --- Scannen ----------------------------------------------------------------
+
+class Switch2ScanCallbacks : public NimBLEScanCallbacks
+{
+  void onResult(const NimBLEAdvertisedDevice *advertisedDevice) override
+  {
+    const std::string manufacturerData = advertisedDevice->getManufacturerData();
+    if (manufacturerData.size() < 2)
+    {
+      return;
+    }
+
+    const uint8_t *data = reinterpret_cast<const uint8_t *>(manufacturerData.data());
+    const uint16_t manufacturerId = static_cast<uint16_t>(data[0] | (data[1] << 8));
+    if (manufacturerId != NINTENDO_MANUFACTURER_ID)
+    {
+      return; // Kein Nintendo-Geraet - sonst waere die Konsole voller Fremdgeraete
+    }
+
+    const NimBLEAddress address = advertisedDevice->getAddress();
+    DeviceRecord *record = findOrCreateDeviceRecord(address);
+    if (record == nullptr)
+    {
+      return;
+    }
+
+    // Advertisements kommen mehrmals pro Sekunde. Ungedrosselt laeuft der
+    // UART-Puffer ueber und die Zeilen verschachteln sich ineinander.
+    const uint32_t nowMs = millis();
+    const bool shouldLog =
+        !record->hasLoggedOnce || (nowMs - record->lastScanLogAtMs) >= SCAN_LOG_INTERVAL_MS;
+
+    if (manufacturerData.size() < MANUFACTURER_DATA_MINIMUM_LENGTH)
+    {
+      if (shouldLog)
+      {
+        record->lastScanLogAtMs = nowMs;
+        record->hasLoggedOnce   = true;
+        Serial.printf("[SCAN]  Nintendo-Geraet %s: MfgData zu kurz (%u Bytes)\n",
+                      address.toString().c_str(),
+                      static_cast<unsigned>(manufacturerData.size()));
+      }
+      return;
+    }
+
+    const uint16_t vendorId = static_cast<uint16_t>(
+        data[MANUFACTURER_DATA_VENDOR_OFFSET] | (data[MANUFACTURER_DATA_VENDOR_OFFSET + 1] << 8));
+    const uint16_t productId = static_cast<uint16_t>(
+        data[MANUFACTURER_DATA_PRODUCT_OFFSET] | (data[MANUFACTURER_DATA_PRODUCT_OFFSET + 1] << 8));
+
+    bool hasHostAddress = false;
+    for (size_t i = 0; i < MANUFACTURER_DATA_HOST_ADDRESS_LENGTH; i++)
+    {
+      if (data[MANUFACTURER_DATA_HOST_ADDRESS_OFFSET + i] != 0x00)
+      {
+        hasHostAddress = true;
         break;
       }
+    }
+    const bool isWakeAdvertisement = data[MANUFACTURER_DATA_WAKE_FLAG_OFFSET] == 0x81;
+    const bool isPairingMode       = !hasHostAddress && !isWakeAdvertisement;
 
-      // Ueber-die-Luft: dem Controller per CCCD-Schreibzugriff mitteilen,
-      // dass er ab jetzt Notifications senden soll (Wert 0x0001).
-      uint16_t notifyEnable = 0x0001;
-      esp_ble_gattc_write_char_descr(
-          gattcInterface,
-          activeConnId,
-          INPUT_REPORT_CCCD_HANDLE,
-          sizeof(notifyEnable),
-          reinterpret_cast<uint8_t *>(&notifyEnable),
-          ESP_GATT_WRITE_TYPE_RSP,
-          ESP_GATT_AUTH_REQ_NONE);
-      break;
+    if (shouldLog)
+    {
+      record->lastScanLogAtMs = nowMs;
+      record->hasLoggedOnce   = true;
+
+      Serial.printf("[SCAN]  Nintendo-Geraet %s  RSSI=%d\n",
+                    address.toString().c_str(), advertisedDevice->getRSSI());
+      Serial.print("[SCAN]    MfgData: ");
+      printHexBytes(data, manufacturerData.size());
+      Serial.println();
+      Serial.printf("[SCAN]    VendorID=0x%04X ProductID=0x%04X  -> %s\n",
+                    vendorId, productId,
+                    isWakeAdvertisement
+                        ? "Wake-Advertisement"
+                        : (hasHostAddress ? "Reconnection-Advertisement (auf anderen Host gekoppelt)"
+                                          : "Standard-Advertisement (Pairing-Modus)"));
+
+      if (!isPairingMode)
+      {
+        Serial.println("[SCAN]    -> Sync-Taste LANG gedrueckt halten, bis die LEDs laufen.");
+        Serial.println("[SCAN]       Kurzer Tastendruck weckt ihn nur fuer seinen alten Host.");
+      }
     }
 
-    case ESP_GATTC_WRITE_DESCR_EVT:
-      if (param->write.status == ESP_GATT_OK)
-      {
-        Serial.println("[SWITCH2] Notifications aktiviert, warte auf Eingaben...");
-      }
-      else
-      {
-        Serial.printf("[SWITCH2] CCCD-Schreibzugriff fehlgeschlagen: 0x%02x\n", param->write.status);
-      }
-      break;
+    if (vendorId != NINTENDO_VENDOR_ID || productId < SWITCH2_LOWEST_PRODUCT_ID)
+    {
+      return;
+    }
 
-    case ESP_GATTC_NOTIFY_EVT:
-      if (param->notify.handle == INPUT_REPORT_HANDLE)
-      {
-        printInputReport05(param->notify.value, param->notify.value_len);
-      }
-      break;
+    // NUR im Pairing-Modus verbinden. Ein Reconnection- oder Wake-Advertisement
+    // richtet sich an den bereits gekoppelten Host und wuerde uns zwangslaeufig
+    // abgewiesen. Jeder solche Fehlversuch zaehlt auf den dokumentierten
+    // Cooldown ein, der den Controller danach minutenlang gar nicht mehr
+    // reagieren laesst - deshalb erst gar nicht versuchen.
+    if (!isPairingMode)
+    {
+      return;
+    }
 
-    case ESP_GATTC_DISCONNECT_EVT:
-      Serial.println("[SWITCH2] Verbindung getrennt, scanne erneut...");
-      controllerFound = false;
-      esp_ble_gap_start_scanning(30);
-      break;
+    // Frischer Sync-Tastendruck ist eine bewusste Nutzeraktion: Backoff aus
+    // frueheren Fehlversuchen verfaellt damit.
+    if (record->failedConnectCount > 0)
+    {
+      record->failedConnectCount     = 0;
+      record->nextConnectAllowedAtMs = 0;
+      Serial.println("[SCAN]    -> Pairing-Modus erkannt, Wartezeit aufgehoben.");
+    }
 
-    default:
-      break;
+    if (findSessionByAddress(address) != nullptr || hasPendingConnectAddress)
+    {
+      return;
+    }
+    if (record->nextConnectAllowedAtMs != 0 &&
+        static_cast<int32_t>(nowMs - record->nextConnectAllowedAtMs) < 0)
+    {
+      return; // Backoff laeuft noch
+    }
+
+    pendingConnectAddress    = address;
+    hasPendingConnectAddress = true;
+    NimBLEDevice::getScan()->stop();
+  }
+};
+
+static Switch2ScanCallbacks scanCallbacks;
+
+// --- Serielle Kommandos -----------------------------------------------------
+
+static void printHelp()
+{
+  Serial.println("[HELP]  b = Tastennamen / rohe Bitmasken  | d = Vollhexdump an/aus");
+  Serial.println("[HELP]  s = Stick-Ausgabe an/aus          | r = Referenz+Kalibrierung neu");
+  Serial.println("[HELP]  h = diese Hilfe");
+}
+
+static void resetAllTrackers()
+{
+  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
+  {
+    if (controllerSessions[i].isInUse)
+    {
+      resetReportTracker(controllerSessions[i].specificReportTracker);
+      resetReportTracker(controllerSessions[i].commonReportTracker);
+    }
+  }
+  Serial.println("[BASE]  Zurueckgesetzt. Controller ruhig liegen lassen bis 'Referenz gesetzt'");
+  Serial.println("[BASE]  - in dieser Phase wird auch die Stick-Mitte neu vermessen.");
+}
+
+static void handleSerialCommands()
+{
+  while (Serial.available() > 0)
+  {
+    const int command = Serial.read();
+    switch (command)
+    {
+      case 'b':
+        shouldPrintButtonNames = !shouldPrintButtonNames;
+        Serial.printf("[CMD]   Tastenausgabe: %s\n",
+                      shouldPrintButtonNames ? "Klartextnamen" : "rohe Bitmasken");
+        break;
+      case 'd':
+        shouldPrintFullHexDump = !shouldPrintFullHexDump;
+        Serial.printf("[CMD]   Vollhexdump: %s\n", shouldPrintFullHexDump ? "an" : "aus");
+        break;
+      case 'r':
+        resetAllTrackers();
+        break;
+      case 's':
+        shouldPrintStickValues = !shouldPrintStickValues;
+        Serial.printf("[CMD]   Stick-Ausgabe: %s\n", shouldPrintStickValues ? "an" : "aus");
+        break;
+      case 'h':
+        printHelp();
+        break;
+      default:
+        break;
+    }
   }
 }
 
-// --- Setup / Loop ------------------------------------------------------------
+// --- Setup / Loop -----------------------------------------------------------
 
 void setup()
 {
   Serial.begin(115200);
   delay(500);
-  Serial.println("[SWITCH2] Starte experimentellen Switch-2-Controller-Scanner");
 
-  nvs_flash_init();
+  Serial.println();
+  Serial.println("=== Switch-2-Controller Rohsignal-Scanner ===");
+  printHelp();
 
-  // Nach einem Soft-Reset (z.B. durch den Monitor/EN-Pin beim Flashen, nicht
-  // durch echtes Stromloswerden) kann der BT-Controller noch vom vorherigen
-  // Lauf aktiv sein — dann fuehrt esp_bt_controller_init() unten teils sogar
-  // zu einem Absturz/Boot-Loop statt nur zu ESP_ERR_INVALID_STATE. Deshalb
-  // erst sauber deinitialisieren, falls er nicht im IDLE-Zustand ist.
-  esp_bt_controller_status_t controllerStatus = esp_bt_controller_get_status();
-  if (controllerStatus != ESP_BT_CONTROLLER_STATUS_IDLE)
-  {
-    esp_bt_controller_disable();
-    esp_bt_controller_deinit();
-  }
+  NimBLEDevice::init("");
+  // Kein Bonding, kein MITM, kein Secure Connections. Der Controller trennt
+  // die Verbindung, sobald der Host SMP-Pairing initiiert.
+  NimBLEDevice::setSecurityAuth(false, false, false);
+  NimBLEDevice::setMTU(247);
 
-  esp_bt_controller_config_t controllerConfiguration = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-  esp_bt_controller_init(&controllerConfiguration);
-  esp_bt_controller_enable(ESP_BT_MODE_BLE);
+  NimBLEScan *scan = NimBLEDevice::getScan();
+  scan->setScanCallbacks(&scanCallbacks, false);
+  scan->setActiveScan(true);
+  scan->setInterval(100);
+  scan->setWindow(80);
+  scan->start(0, false, true);
 
-  esp_bluedroid_init();
-  esp_bluedroid_enable();
-
-  esp_ble_gap_register_callback(onBleGapEvent);
-  esp_ble_gattc_register_callback(onGattcEvent);
-  esp_ble_gattc_app_register(0);
-
-  esp_ble_gap_set_scan_params(&bleScanParameters);
-
-  Serial.println("[SWITCH2] Scanne... Controller per Sync-Taste in Pairing-Modus bringen.");
+  Serial.println("[SCAN]  Scanne... Joy-Con mit gedrueckter Sync-Taste in Pairing-Modus bringen.");
 }
 
 void loop()
 {
-  delay(1000);
+  handleSerialCommands();
+
+  if (hasPendingConnectAddress)
+  {
+    const NimBLEAddress address = pendingConnectAddress;
+    hasPendingConnectAddress    = false;
+    connectToController(address);
+  }
+
+  delay(10);
 }
