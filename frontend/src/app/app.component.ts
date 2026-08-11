@@ -17,8 +17,7 @@ export class AppComponent implements OnInit, OnDestroy {
   brokerUrl = `ws://${window.location.hostname}:${environment.mqttWebsocketPort}`;
   connectionStatus: ConnectionStatus = 'disconnected';
   devices: DeviceState[] = [];
-  commandLog: MessageLog[] = [];
-  inputLog: MessageLog[] = [];
+  deviceLogs: Record<string, MessageLog[]> = {};
 
   // Gleicher Default wie PANEL_MOTOR_SPEED in claw_machine.py. Anders als die
   // Beschleunigung ist das keine Einstellung auf dem ESP, sondern wird bei
@@ -38,8 +37,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.subs.push(
       this.mqttService.connectionStatus$.subscribe(s => (this.connectionStatus = s)),
       this.mqttService.devices$.subscribe(d => (this.devices = d)),
-      this.mqttService.commandLog$.subscribe(l => (this.commandLog = l)),
-      this.mqttService.inputLog$.subscribe(l => (this.inputLog = l)),
+      this.mqttService.deviceLogs$.subscribe(l => (this.deviceLogs = l)),
       // Trigger change detection every second to refresh uptime displays
       interval(1000).subscribe(() => {
         this.devices = [...this.mqttService.devices$.value];
@@ -75,8 +73,10 @@ export class AppComponent implements OnInit, OnDestroy {
     return this.devices.filter(d => d.isOnline).length;
   }
 
-  shortTopic(topic: string): string {
-    return topic.replace('clawmachine/', '');
+  // Zeigt im Geräte-Log nur den Teil des Topics, der über den Gerätenamen
+  // hinausgeht (z.B. "clawmachine/player_input/panel" + "player_input" -> "panel").
+  logSubTopic(topic: string, deviceId: string): string {
+    return topic.replace(`clawmachine/${deviceId}/`, '');
   }
 
   // Achsen-Vorzeichen spiegeln die Server-Logik für das physische Panel

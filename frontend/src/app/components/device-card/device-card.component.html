@@ -1,6 +1,6 @@
 <div class="card" [class.online]="device.isOnline" [class.offline]="!device.isOnline">
   <div class="card-header">
-    <span class="device-icon">{{ deviceIcon }}</span>
+    <span class="device-icon">📡</span>
     <span class="device-label">{{ device.label }}</span>
     <span class="status-badge" [class.badge-online]="device.isOnline" [class.badge-offline]="!device.isOnline">
       <span class="status-dot"></span>
