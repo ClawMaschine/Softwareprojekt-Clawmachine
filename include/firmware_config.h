@@ -86,10 +86,10 @@
 
 // Hardware panel button GPIO pins — an tatsächliche Verdrahtung anpassen
 #ifndef CLAW_PANEL_PIN_UP
-#define CLAW_PANEL_PIN_UP      32
+#define CLAW_PANEL_PIN_UP      17
 #endif
 #ifndef CLAW_PANEL_PIN_DOWN
-#define CLAW_PANEL_PIN_DOWN    33
+#define CLAW_PANEL_PIN_DOWN    16
 #endif
 #ifndef CLAW_PANEL_PIN_LEFT
 #define CLAW_PANEL_PIN_LEFT    3
@@ -103,11 +103,15 @@
 #ifndef CLAW_PANEL_PIN_BACK
 #define CLAW_PANEL_PIN_BACK    1
 #endif
-#ifndef CLAW_PANEL_PIN_GRAB
-#define CLAW_PANEL_PIN_GRAB    27
+// Greifen/Loslassen kommt vom Potentiometer an SVP, nicht von Tastern.
+// Muss ein ADC1-Pin sein (32, 33, 34, 35, 36, 39) — ADC2-Pins liefern
+// bei aktivem WiFi keine gültigen Messwerte.
+#ifndef CLAW_PANEL_PIN_POTENTIOMETER
+#define CLAW_PANEL_PIN_POTENTIOMETER 36
 #endif
-#ifndef CLAW_PANEL_PIN_RELEASE
-#define CLAW_PANEL_PIN_RELEASE 14
+// Rohwert ist 12 Bit (0–4095), 2048 ist die Mittelstellung.
+#ifndef CLAW_PANEL_POTENTIOMETER_THRESHOLD
+#define CLAW_PANEL_POTENTIOMETER_THRESHOLD 2048
 #endif
 
 // Motor-Shield-Verdrahtung — an tatsächliche Verdrahtung anpassen
