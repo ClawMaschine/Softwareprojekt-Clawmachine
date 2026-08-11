@@ -1,19 +1,30 @@
 <!DOCTYPE html>
 <html lang="de">
+
 <head>
   <meta charset="UTF-8">
   <!-- Kein JS erlaubt/nötig — lädt sich per Meta-Refresh selbst neu und holt
        dabei ein frisches Einzelbild (siehe Cache-Control in webserver.py).
        Dieses Dokument liegt in einem <iframe> in index.html, damit nur das
        Bild flackert und nicht die ganze Seite. -->
-  <meta http-equiv="refresh" content="1">
+  <meta http-equiv="refresh" content="0.1">
   <title>Kamera</title>
   <style>
-    body { margin: 0; background: #161b22; }
-    img  { display: block; width: 100%; height: auto; }
+    body {
+      margin: 0;
+      background: #161b22;
+    }
+
+    img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
   </style>
 </head>
+
 <body>
   <img src="/camera/snapshot" alt="Live-Kamerabild der Klaue">
 </body>
+
 </html>
