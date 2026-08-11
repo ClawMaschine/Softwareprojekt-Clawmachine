@@ -59,8 +59,34 @@ print_info "Installiere Python-Abhängigkeiten"
 print_info "Richte WLAN-Hotspot ein (Access Point für ESP32-Boards)"
 run_as_root python3 "$script_directory/setup_hotspot.py"
 
+mosquitto_passwords_path="$repository_root_directory/docker/mosquitto/config/passwords"
+
+if [[ -f "$mosquitto_passwords_path" ]]; then
+    print_info "Mosquitto-Passwortdatei bereits vorhanden"
+else
+    print_info "Erzeuge Mosquitto-Passwortdatei (nicht in Git, siehe .gitignore)"
+
+    # Zugangsdaten aus config.ini/config.local.ini wiederverwenden statt hier
+    # erneut zu parsen — siehe python_server/configuration_loader.py.
+    mqtt_credentials="$(cd "$repository_root_directory" && python3 -c "
+from python_server.configuration_loader import load_mqtt_configuration
+mqtt_configuration = load_mqtt_configuration()
+print(mqtt_configuration.username)
+print(mqtt_configuration.password)
+")"
+    mqtt_username="$(sed -n '1p' <<< "$mqtt_credentials")"
+    mqtt_password="$(sed -n '2p' <<< "$mqtt_credentials")"
+
+    docker run --rm \
+        -v "$repository_root_directory/docker/mosquitto/config:/mosquitto/config" \
+        eclipse-mosquitto:latest \
+        mosquitto_passwd -b -c /mosquitto/config/passwords "$mqtt_username" "$mqtt_password"
+
+    printf 'Mosquitto-Passwortdatei erzeugt für Benutzer "%s".\n' "$mqtt_username"
+fi
+
 print_info "Setze berechtigungen für die Mosquitto-Konfigurationsdateien"
-run_as_root chmod 644 docker/mosquitto/config/passwords 
+run_as_root chmod 644 docker/mosquitto/config/passwords
 run_as_root chmod 644 docker/mosquitto/config/mosquitto.conf 
 run_as_root chmod 755 docker/mosquitto/config
 

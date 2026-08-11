@@ -9,6 +9,9 @@ __pycache__/
 data/index.html
 data/style.css
 docker/mosquitto/data/mosquitto.db
+# Enthält den MQTT-Passwort-Hash — wird bei Bedarf von setup_server.sh erzeugt
+# (siehe dort) bzw. lokal von scripts/dev/set_mqtt_broker_password.sh gepflegt.
+docker/mosquitto/config/passwords
 **/__pycache__/
 .claude/settings.local.json
 frontend/node_modules/
