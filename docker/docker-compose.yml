@@ -11,6 +11,8 @@ services:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
+    networks:
+      - clawmachine_network
 
   # DNS: leitet alle Anfragen auf 192.168.0.103 um → Clients landen im Frontend
   captive-dns:
@@ -29,5 +31,22 @@ services:
       dockerfile: docker/frontend/Dockerfile
     container_name: clawmachine-frontend
     restart: unless-stopped
+    networks:
+      - clawmachine_network
     ports:
       - "0.0.0.0:80:80"
+
+  server:
+    build:
+      context: .. # Repo-Root (docker-compose liegt in docker/)
+      dockerfile: python_server/Dockerfile
+    container_name: clawmachine-server
+    restart: unless-stopped
+    networks:
+      - clawmachine_network
+    depends_on:
+      - mqtt-broker
+
+networks:
+  clawmachine_network:
+    driver: bridge

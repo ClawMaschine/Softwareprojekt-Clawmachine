@@ -2,54 +2,80 @@
 
 ClawMotorController *ClawMotorController::instance = nullptr;
 
-ClawMotorController::ClawMotorController(ClawMqttConnection &connection)
-    : connection(connection)
+ClawMotorController::ClawMotorController(
+    ClawMqttConnection &connection,
+    uint8_t motorShieldAI2cAddress,
+    uint8_t motorShieldBI2cAddress,
+    uint16_t maxRevolutionsPerMinute,
+    uint8_t clawServoPin,
+    float accelerationPercentPerSecond)
+    : connection(connection),
+      motorShieldAI2cAddress(motorShieldAI2cAddress),
+      motorShieldBI2cAddress(motorShieldBI2cAddress),
+      accelerationPercentPerSecond(accelerationPercentPerSecond),
+      motorShieldA(motorShieldAI2cAddress),
+      motorShieldB(motorShieldBI2cAddress),
+      xMotorLeft(motorShieldB, 1, maxRevolutionsPerMinute),
+      yMotor(motorShieldA, 1, maxRevolutionsPerMinute),
+      xMotorRight(motorShieldB, 2, maxRevolutionsPerMinute),
+      zMotor(motorShieldA, 2, maxRevolutionsPerMinute),
+      clawServo(clawServoPin)
 {
   instance = this;
 }
 
 void ClawMotorController::begin()
 {
-  connection.setMessageCallback(onMqttMessage);
+  if (!motorShieldA.begin()) {
+    Serial.printf("[MOTOR] FEHLER: Motor Shield A (I2C 0x%02X) antwortet nicht!\n", motorShieldAI2cAddress);
+  }
+  if (!motorShieldB.begin()) {
+    Serial.printf("[MOTOR] FEHLER: Motor Shield B (I2C 0x%02X) antwortet nicht!\n", motorShieldBI2cAddress);
+  }
+
+  xMotorLeft.begin();
+  yMotor.begin();
+  xMotorRight.begin();
+  zMotor.begin();
+  clawServo.begin();
+
+  xMotorLeft.setAcceleration(accelerationPercentPerSecond);
+  yMotor.setAcceleration(accelerationPercentPerSecond);
+  xMotorRight.setAcceleration(accelerationPercentPerSecond);
+  zMotor.setAcceleration(accelerationPercentPerSecond);
+
+  // Permanenter Log, damit sich "wird die Beschleunigung wirklich genutzt?"
+  // direkt am Serial-Monitor beim Booten beantworten laesst, ohne den Code
+  // lesen zu muessen. 0 heisst: kein Ramping, Geschwindigkeit springt sofort.
+  Serial.printf("[MOTOR] Beschleunigung: %.1f %%/s\n", accelerationPercentPerSecond);
+
   connection.subscribe(COMMAND_TOPIC);
 }
 
-void ClawMotorController::onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
+void ClawMotorController::update()
 {
-  if (instance == nullptr) {
-    return;
-  }
-
-  char payloadStr[length + 1];
-  memcpy(payloadStr, payload, length);
-  payloadStr[length] = '\0';
-
-  if (strncmp(payloadStr, "x:", 2) == 0) {
-    instance->move('x', atoi(payloadStr + 2));
-  } else if (strncmp(payloadStr, "y:", 2) == 0) {
-    instance->move('y', atoi(payloadStr + 2));
-  } else if (strncmp(payloadStr, "z:", 2) == 0) {
-    instance->moveZ(constrain(atoi(payloadStr + 2), -100, 100));
-  } else if (strncmp(payloadStr, "claw:", 5) == 0) {
-    instance->moveClaw(constrain(atoi(payloadStr + 5), -100, 100));
-  } else {
-    Serial.print("[MOTOR] Unknown command: ");
-    Serial.println(payloadStr);
-  }
+  xMotorLeft.update();
+  yMotor.update();
+  xMotorRight.update();
+  zMotor.update();
 }
+
 
 void ClawMotorController::move(char axis, int speed)
 {
   switch (axis) {
-    case 'x':
+    case 'X':
       currentX = speed;
+      // xMotorLeft und xMotorRight sind gegensinnig montiert (siehe altes Referenzprogramm) —
+      // ohne Spiegelung wuerden sie gegeneinander statt gemeinsam fahren.
+      xMotorLeft.setSpeed(speed);
+      xMotorRight.setSpeed(-speed);
       Serial.printf("[MOTOR] X: %d\n", speed);
-      // TODO: GPIO motor control
       break;
-    case 'y':
+    case 'Y':
       currentY = speed;
+      yMotor.setSpeed(speed);
       Serial.printf("[MOTOR] Y: %d\n", speed);
-      // TODO: GPIO motor control
       break;
   }
 }
@@ -57,13 +83,31 @@ void ClawMotorController::move(char axis, int speed)
 void ClawMotorController::moveZ(int speed)
 {
   ropeSpeed = speed;
+  zMotor.setSpeed(speed);
   Serial.printf("[MOTOR] Z (Seil): %d\n", speed);
-  // TODO: GPIO motor control
 }
 
-void ClawMotorController::moveClaw(int speed)
+void ClawMotorController::setAcceleration(float percentPerSecond)
 {
-  clawSpeed = speed;
-  Serial.printf("[MOTOR] Klaue: %d\n", speed);
-  // TODO: GPIO motor control
+  accelerationPercentPerSecond = percentPerSecond;
+
+  xMotorLeft.setAcceleration(percentPerSecond);
+  yMotor.setAcceleration(percentPerSecond);
+  xMotorRight.setAcceleration(percentPerSecond);
+  zMotor.setAcceleration(percentPerSecond);
+
+  Serial.printf("[MOTOR] Beschleunigung geaendert: %.1f %%/s\n", percentPerSecond);
+}
+
+void ClawMotorController::moveClaw(const char *command)
+{
+  if (strcmp(command, "open") == 0) {
+    clawServo.open();
+    Serial.println("[MOTOR] Klaue: open");
+  } else if (strcmp(command, "close") == 0) {
+    clawServo.close();
+    Serial.println("[MOTOR] Klaue: close");
+  } else {
+    Serial.printf("[MOTOR] Klaue: unbekannter Befehl: %s\n", command);
+  }
 }

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Clawmachine – Projekt starten TUI
-Startet MQTT-Broker (Docker) und Python-Server mit Live-Log-Ausgabe.
+Baut und startet alle Docker-Services (MQTT-Broker, CaptiveDNS, Frontend, Server)
+und zeigt die Live-Logs des Servers an.
 """
 
 import re
@@ -35,7 +36,6 @@ console = Console()
 
 _SCRIPT_DIR  = Path(__file__).parent
 _REPO_ROOT   = _SCRIPT_DIR.parent.parent
-_VENV        = _REPO_ROOT / ".venv"
 _COMPOSE     = _REPO_ROOT / "docker" / "docker-compose.yml"
 
 # ─── Log-Level-Erkennung ─────────────────────────────────────────────────────
@@ -123,7 +123,7 @@ def _show_header() -> None:
     console.print()
     console.print(Panel(
         "[bold cyan]Clawmachine[/] – Projekt starten\n"
-        "[dim]Baut und startet Docker-Services (MQTT-Broker, CaptiveDNS, Frontend) und Python-Server.[/dim]",
+        "[dim]Baut und startet alle Docker-Services (MQTT-Broker, CaptiveDNS, Frontend, Server).[/dim]",
         title="[bold]Start[/]",
         border_style="cyan",
     ))
@@ -152,9 +152,6 @@ def _show_state() -> None:
         else:
             t.add_row("  (keine Container)", "[dim]–[/]", "noch nicht gestartet")
 
-    venv_ok = (_VENV / "bin" / "activate").exists()
-    t.add_row(".venv", "[green]● vorhanden[/]" if venv_ok else "[red]○ fehlt[/]", str(_VENV) if venv_ok else "setup_server.py ausführen")
-
     console.print(t)
 
 
@@ -165,9 +162,6 @@ def _check_prerequisites() -> bool:
         ok = False
     if not _COMPOSE.exists():
         console.print(f"  [red]✗ {_COMPOSE} nicht gefunden[/]")
-        ok = False
-    if not (_VENV / "bin" / "activate").exists():
-        console.print("  [red]✗ .venv fehlt – bitte setup_server.py ausführen[/]")
         ok = False
     return ok
 
@@ -181,7 +175,7 @@ def _start_docker_services() -> bool:
     # Images bauen (nur wenn Dockerfile/Quellcode geändert – cached sonst)
     if not _stream(
         ["docker", "compose", "-f", str(_COMPOSE), "build"],
-        "Images bauen (mqtt-broker, captive-dns, frontend)",
+        "Images bauen (mqtt-broker, captive-dns, frontend, server)",
     ):
         return False
 
@@ -201,18 +195,17 @@ def _start_docker_services() -> bool:
     return True
 
 
-def _stream_server() -> None:
+def _stream_server_logs() -> None:
     console.print()
-    console.print(Rule("[bold]2 · Python-Server[/]", style="blue"))
-    console.print("  [dim](Strg+C beendet den Server – MQTT-Broker läuft weiter)[/dim]\n")
+    console.print(Rule("[bold]2 · Python-Server (Container-Logs)[/]", style="blue"))
+    console.print("  [dim](Strg+C beendet nur die Log-Anzeige – Container laufen weiter,"
+                  " zum Stoppen: scripts/run/stop_project.py)[/dim]\n")
 
-    python = str(_VENV / "bin" / "python")
     process = subprocess.Popen(
-        [python, "-m", "python_server"],
+        ["docker", "compose", "-f", str(_COMPOSE), "logs", "-f", "--tail", "50", "server"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        cwd=str(_REPO_ROOT),
     )
 
     try:
@@ -220,13 +213,12 @@ def _stream_server() -> None:
             _log(line)
         process.wait()
     except KeyboardInterrupt:
-        console.print("\n  [yellow]Server wird beendet …[/]")
+        console.print("\n  [yellow]Log-Anzeige beendet (Container laufen weiter) …[/]")
         process.terminate()
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             process.kill()
-        console.print("  [green]✓ Server gestoppt[/]")
 
 
 # ─── Hauptprogramm ────────────────────────────────────────────────────────────
@@ -246,15 +238,15 @@ def main() -> None:
         console.print("[red]✗ Docker Services konnten nicht gestartet werden.[/]")
         sys.exit(1)
 
-    # Server mit Live-Logs
-    _stream_server()
+    # Server-Logs (Container läuft im Hintergrund weiter)
+    _stream_server_logs()
 
     # Abschluss
     console.print()
     console.print(Panel(
-        "[green]✓ Server beendet[/]\n\n"
-        "[dim]MQTT-Broker läuft noch im Hintergrund.\n"
-        f"Stoppen:  docker compose -f docker/docker-compose.yml down[/dim]",
+        "[green]✓ Log-Anzeige beendet[/]\n\n"
+        "[dim]Alle Container laufen weiter im Hintergrund.\n"
+        "Stoppen:  python3 scripts/run/stop_project.py[/dim]",
         border_style="green",
     ))
 

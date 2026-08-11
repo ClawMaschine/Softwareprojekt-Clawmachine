@@ -7,6 +7,8 @@ struct PanelInput {
     bool down_button    = false;
     bool left_button    = false;
     bool right_button   = false;
+    bool front_button   = false;
+    bool back_button    = false;
     bool grab_button    = false;
     bool release_button = false;
 
@@ -16,3 +18,5 @@ struct PanelInput {
     // Gibt false zurück wenn Links+Rechts oder Hoch+Runter gleichzeitig gedrückt sind
     bool isValid() const;
 };
+
+

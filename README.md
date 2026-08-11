@@ -38,13 +38,11 @@ python3 scripts/run/start_project.py
 | `init_project.sh` | `scripts/setup/` | Lokale Entwicklungsumgebung einrichten (apt/pacman/brew) |
 | `install_python_dependencies.sh` | `scripts/setup/` | `.venv` erstellen + `requirements.txt` installieren |
 | `install_deb_files_on_raspberry.sh` | `scripts/setup/` | `.deb`-Pakete aus `data/deb_files/` installieren (Offline) |
-| `start_project.py` | `scripts/run/` | **Projekt starten (TUI)** – Broker + Server mit Live-Logs |
-| `start_project.sh` | `scripts/run/` | Projekt starten ohne TUI (legacy) |
-| `start_mqtt_broker.sh` | `scripts/run/` | Nur MQTT-Broker starten (Docker) |
-| `stop_clawmachine.sh` | `scripts/run/` | Server + Broker stoppen |
-| `stop_mqtt_broker.sh` | `scripts/run/` | Nur MQTT-Broker stoppen |
+| `start_project.py` | `scripts/run/` | **Projekt starten (TUI)** – alle Docker-Services bauen/starten, Server-Logs live |
+| `stop_project.py` | `scripts/run/` | **Projekt stoppen (TUI)** – alle Docker-Services stoppen |
+| `run_project.py` | `scripts/run/` | **Projekt-Dashboard (TUI)** – startet alle Services, zeigt jeden Container in eigenem Log-Tile; Strg+C stoppt alle Container |
 | `generate_firmware_config.py` | `scripts/dev/` | `config.ini` → `include/firmware_config.h` |
-| `run_emulated_esp_once.sh` | `scripts/dev/` | Simulierten ESP32 starten (Uptime-Daten an Broker) |
+| `run_emulated_esp_once.sh` | `scripts/dev/` | Simulierten ESP32 starten (`emulated` = nur Uptime, `steering` = Tastatursteuerung X/Y/Z + Klaue) |
 | `mqtt_broker_logs.sh` | `scripts/dev/` | Broker-Logs live anzeigen |
 | `mqtt_message_logs.sh` | `scripts/dev/` | Alle MQTT-Nachrichten mitschneiden (`#`) |
 
@@ -95,20 +93,30 @@ python3 scripts/run/start_project.py
 ╚══════════════════════════════════════════════════════════════════╝
 
   python3 scripts/run/start_project.py               ← TUI ✦
-  ├── docker compose up -d        (MQTT-Broker)
-  │       Port 1883 + 9001
-  └── python -m python_server     (Server, Live-Logs)
+  ├── docker compose build        (mqtt-broker, captive-dns, frontend, server)
+  ├── docker compose up -d        (alle Services, Server läuft im Container)
+  │       Port 1883 + 9001 (Broker), 80 (Frontend)
+  └── docker compose logs -f server   (Live-Logs)
           │
-          Strg+C ──► Sauberer Shutdown
+          Strg+C ──► Log-Anzeige beendet, Container laufen weiter
 
 
 ╔══════════════════════════════════════════════════════════════════╗
 ║  Projekt stoppen                                       ║
 ╚══════════════════════════════════════════════════════════════════╝
 
-  scripts/run/stop_clawmachine.sh
-  ├── pkill python_server
-  └── docker compose down
+  python3 scripts/run/stop_project.py                 ← TUI ✦
+  └── docker compose down         (alle Services)
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║  Projekt starten + überwachen (Dashboard)               ║
+╚══════════════════════════════════════════════════════════════════╝
+
+  python3 scripts/run/run_project.py                  ← TUI ✦
+  ├── docker compose build + up -d   (alle Services)
+  ├── Ein Log-Tile pro Container (mqtt-broker, captive-dns, frontend, server)
+  └── Strg+C ──► docker compose down (alle Container werden gestoppt)
 
 
 ╔══════════════════════════════════════════════════════════════════╗
@@ -215,12 +223,14 @@ python -m python_server
 
 ---
 
-## MQTT-Broker (Docker)
+## Docker-Services (MQTT-Broker, CaptiveDNS, Frontend, Server)
+
+Alle Services laufen als ein Docker-Compose-Stack und werden gemeinsam gestartet/gestoppt:
 
 ```bash
-./scripts/run/start_mqtt_broker.sh    # starten
-./scripts/run/stop_mqtt_broker.sh     # stoppen
-./scripts/dev/mqtt_broker_logs.sh     # Logs anzeigen
+python3 scripts/run/start_project.py  # bauen + starten, Server-Logs live
+python3 scripts/run/stop_project.py   # stoppen
+./scripts/dev/mqtt_broker_logs.sh     # nur Broker-Logs anzeigen
 ./scripts/dev/mqtt_message_logs.sh    # alle MQTT-Nachrichten mitschneiden
 ```
 
@@ -242,7 +252,10 @@ Geteilte Werte aus `config.ini` generieren: `python scripts/dev/generate_firmwar
 ## Emulator (ohne Hardware testen)
 
 ```bash
-./scripts/dev/run_emulated_esp_once.sh
+./scripts/dev/run_emulated_esp_once.sh              # generischer ESP (nur Uptime)
+./scripts/dev/run_emulated_esp_once.sh steering      # Tastatursteuerung (WASD + Q/E + O/C),
+                                                      # sendet X:/Y:/Z:/claw:-Befehle an den Server,
+                                                      # der Server leitet sie an den Motor-Controller weiter
 ```
 
 Simuliert ein ESP-Gerät und sendet Uptime-Daten an den Broker.

@@ -31,4 +31,6 @@ if ! python3 -c "import paho.mqtt.client" >/dev/null 2>&1; then
     exit 1
 fi
 
-python3 -m python_server.emulated_esp.emulated
+# Emulator-Modul waehlen, z. B.: ./run_emulated_esp_once.sh steering
+emulator_module="${1:-emulated}"
+python3 -m "python_server.emulated_esp.${emulator_module}"

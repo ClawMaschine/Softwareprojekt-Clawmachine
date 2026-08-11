@@ -7,8 +7,9 @@ void PanelInput::begin()
     pinMode(CLAW_PANEL_PIN_DOWN,    INPUT_PULLUP);
     pinMode(CLAW_PANEL_PIN_LEFT,    INPUT_PULLUP);
     pinMode(CLAW_PANEL_PIN_RIGHT,   INPUT_PULLUP);
-    pinMode(CLAW_PANEL_PIN_GRAB,    INPUT_PULLUP);
-    pinMode(CLAW_PANEL_PIN_RELEASE, INPUT_PULLUP);
+    pinMode(CLAW_PANEL_PIN_FRONT,   INPUT_PULLUP);
+    pinMode(CLAW_PANEL_PIN_BACK,    INPUT_PULLUP);
+    pinMode(CLAW_PANEL_PIN_POTENTIOMETER, INPUT);
 }
 
 void PanelInput::read()
@@ -18,8 +19,12 @@ void PanelInput::read()
     down_button    = digitalRead(CLAW_PANEL_PIN_DOWN)    == LOW;
     left_button    = digitalRead(CLAW_PANEL_PIN_LEFT)    == LOW;
     right_button   = digitalRead(CLAW_PANEL_PIN_RIGHT)   == LOW;
-    grab_button    = digitalRead(CLAW_PANEL_PIN_GRAB)    == LOW;
-    release_button = digitalRead(CLAW_PANEL_PIN_RELEASE) == LOW;
+    front_button   = digitalRead(CLAW_PANEL_PIN_FRONT)   == LOW;
+    back_button    = digitalRead(CLAW_PANEL_PIN_BACK)    == LOW;
+    // Poti statt Taster: unterhalb der Schwelle greifen, oberhalb loslassen
+    const int potentiometer_value = analogRead(CLAW_PANEL_PIN_POTENTIOMETER);
+    grab_button    = potentiometer_value <  CLAW_PANEL_POTENTIOMETER_THRESHOLD;
+    release_button = potentiometer_value >= CLAW_PANEL_POTENTIOMETER_THRESHOLD;
 }
 
 bool PanelInput::isValid() const

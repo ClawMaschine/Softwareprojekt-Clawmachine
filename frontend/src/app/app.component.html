@@ -46,6 +46,84 @@
     }
   </div>
 
+  <!-- Steuerung -->
+  <section class="section">
+    <h2 class="section-title">Steuerung <span class="topic-badge">clawmachine/web_interface/command</span></h2>
+    <div class="control-panel">
+      <div class="dpad">
+        <button
+          class="dpad-btn dpad-up"
+          [disabled]="connectionStatus !== 'connected'"
+          (pointerdown)="startMoveY('up')"
+          (pointerup)="stopMoveY()"
+          (pointerleave)="stopMoveY()"
+        >▲</button>
+        <button
+          class="dpad-btn dpad-left"
+          [disabled]="connectionStatus !== 'connected'"
+          (pointerdown)="startMoveX('left')"
+          (pointerup)="stopMoveX()"
+          (pointerleave)="stopMoveX()"
+        >◀</button>
+        <button
+          class="dpad-btn dpad-right"
+          [disabled]="connectionStatus !== 'connected'"
+          (pointerdown)="startMoveX('right')"
+          (pointerup)="stopMoveX()"
+          (pointerleave)="stopMoveX()"
+        >▶</button>
+        <button
+          class="dpad-btn dpad-down"
+          [disabled]="connectionStatus !== 'connected'"
+          (pointerdown)="startMoveY('down')"
+          (pointerup)="stopMoveY()"
+          (pointerleave)="stopMoveY()"
+        >▼</button>
+      </div>
+      <div class="claw-controls">
+        <button
+          class="btn btn-claw"
+          [disabled]="connectionStatus !== 'connected'"
+          (click)="sendClaw('open')"
+        >Klaue öffnen</button>
+        <button
+          class="btn btn-claw"
+          [disabled]="connectionStatus !== 'connected'"
+          (click)="sendClaw('close')"
+        >Klaue schließen</button>
+      </div>
+      <div class="accel-controls">
+        <label class="accel-label" for="speed-input">Geschwindigkeit (%)</label>
+        <input
+          id="speed-input"
+          class="accel-input"
+          type="number"
+          min="0"
+          max="100"
+          step="1"
+          [(ngModel)]="controlSpeed"
+        />
+      </div>
+      <div class="accel-controls">
+        <label class="accel-label" for="accel-input">Beschleunigung (%/s)</label>
+        <input
+          id="accel-input"
+          class="accel-input"
+          type="number"
+          min="0"
+          step="1"
+          [(ngModel)]="accelerationPercentPerSecond"
+          [disabled]="connectionStatus !== 'connected'"
+        />
+        <button
+          class="btn btn-claw"
+          [disabled]="connectionStatus !== 'connected'"
+          (click)="sendAcceleration()"
+        >Setzen</button>
+      </div>
+    </div>
+  </section>
+
   <!-- Device Cards -->
   <section class="section">
     <h2 class="section-title">Geräte</h2>

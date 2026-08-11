@@ -29,7 +29,11 @@
 #endif
 
 #ifndef CLAW_MQTT_USER_PASSWORD
-#define CLAW_MQTT_USER_PASSWORD "clawmachine_secret"
+#define CLAW_MQTT_USER_PASSWORD "claw_secret"
+#endif
+
+#ifndef CLAW_DEVICE_ADDED_TOPIC
+#define CLAW_DEVICE_ADDED_TOPIC "clawmachine/device/added"
 #endif
 
 #ifndef SWITCH_JOYCON_RIGHT_CLIENT_ID
@@ -82,20 +86,50 @@
 
 // Hardware panel button GPIO pins — an tatsächliche Verdrahtung anpassen
 #ifndef CLAW_PANEL_PIN_UP
-#define CLAW_PANEL_PIN_UP      32
+#define CLAW_PANEL_PIN_UP      17
 #endif
 #ifndef CLAW_PANEL_PIN_DOWN
-#define CLAW_PANEL_PIN_DOWN    33
+#define CLAW_PANEL_PIN_DOWN    16
 #endif
 #ifndef CLAW_PANEL_PIN_LEFT
-#define CLAW_PANEL_PIN_LEFT    25
+#define CLAW_PANEL_PIN_LEFT    3
 #endif
 #ifndef CLAW_PANEL_PIN_RIGHT
-#define CLAW_PANEL_PIN_RIGHT   26
+#define CLAW_PANEL_PIN_RIGHT   21
 #endif
-#ifndef CLAW_PANEL_PIN_GRAB
-#define CLAW_PANEL_PIN_GRAB    27
+#ifndef CLAW_PANEL_PIN_FRONT
+#define CLAW_PANEL_PIN_FRONT   22
 #endif
-#ifndef CLAW_PANEL_PIN_RELEASE
-#define CLAW_PANEL_PIN_RELEASE 14
+#ifndef CLAW_PANEL_PIN_BACK
+#define CLAW_PANEL_PIN_BACK    1
+#endif
+// Greifen/Loslassen kommt vom Potentiometer an SVP, nicht von Tastern.
+// Muss ein ADC1-Pin sein (32, 33, 34, 35, 36, 39) — ADC2-Pins liefern
+// bei aktivem WiFi keine gültigen Messwerte.
+#ifndef CLAW_PANEL_PIN_POTENTIOMETER
+#define CLAW_PANEL_PIN_POTENTIOMETER 36
+#endif
+// Rohwert ist 12 Bit (0–4095), 2048 ist die Mittelstellung.
+#ifndef CLAW_PANEL_POTENTIOMETER_THRESHOLD
+#define CLAW_PANEL_POTENTIOMETER_THRESHOLD 2048
+#endif
+
+// Motor-Shield-Verdrahtung — an tatsächliche Verdrahtung anpassen
+#ifndef CLAW_MOTOR_SHIELD_A_I2C_ADDRESS
+#define CLAW_MOTOR_SHIELD_A_I2C_ADDRESS 0x60
+#endif
+#ifndef CLAW_MOTOR_SHIELD_B_I2C_ADDRESS
+#define CLAW_MOTOR_SHIELD_B_I2C_ADDRESS 0x62
+#endif
+#ifndef CLAW_MOTOR_MAX_REVOLUTIONS_PER_MINUTE
+#define CLAW_MOTOR_MAX_REVOLUTIONS_PER_MINUTE 120
+#endif
+// Beschleunigung in Prozentpunkten Geschwindigkeit pro Sekunde — 200 heisst
+// z.B. von Stillstand auf volle Geschwindigkeit in 0.5s. An tatsächliche
+// Mechanik/Gewicht der Klaue anpassen.
+#ifndef CLAW_MOTOR_ACCELERATION_PERCENT_PER_SECOND
+#define CLAW_MOTOR_ACCELERATION_PERCENT_PER_SECOND 50
+#endif
+#ifndef CLAW_CLAW_SERVO_PIN
+#define CLAW_CLAW_SERVO_PIN 13
 #endif
