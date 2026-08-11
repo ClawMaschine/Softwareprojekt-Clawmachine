@@ -1,0 +1,64 @@
+Tasten Rechts
+    Rechte Obere Schulter Taste R
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x00 -> 0x10   bits gesetzt: 0x10
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x10 -> 0x00   bits geloescht: 0x10
+    Rechte Hintere Schultertaste ZR
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x00 -> 0x20   bits gesetzt: 0x20
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x20 -> 0x00   bits geloescht: 0x20
+    Rechts X Taste
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x00 -> 0x08   bits gesetzt: 0x08
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x08 -> 0x00   bits geloescht: 0x08
+    Rechts A Taste
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x00 -> 0x02   bits gesetzt: 0x02
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x02 -> 0x00   bits geloescht: 0x02
+    Rechts B Taste
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x00 -> 0x01   bits gesetzt: 0x01
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x01 -> 0x00   bits geloescht: 0x01
+    Rechts Y Taste
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x00 -> 0x04   bits gesetzt: 0x04
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x04 -> 0x00   bits geloescht: 0x04
+    Rechts + Taste
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x00 -> 0x40   bits gesetzt: 0x40
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x40 -> 0x00   bits geloescht: 0x40
+    Rechts Home Tasten
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x03: 0x00 -> 0x01   bits gesetzt: 0x01
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x03: 0x01 -> 0x00   bits geloescht: 0x01
+    Rechts C Taste
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x03: 0x00 -> 0x10   bits gesetzt: 0x10
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x03: 0x10 -> 0x00   bits geloescht: 0x10
+    Rechts SR 
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x03: 0x00 -> 0x40   bits gesetzt: 0x40
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x03: 0x40 -> 0x00   bits geloescht: 0x40
+    Rechts SL 
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x03: 0x00 -> 0x80   bits gesetzt: 0x80
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x03: 0x80 -> 0x00   bits geloescht: 0x80
+
+    Stick Reindrücken
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x00 -> 0x80   bits gesetzt: 0x80
+    [DIFF]  Joy-Con 2 (R) / Report 0x08: byte 0x02: 0x80 -> 0x00   bits geloescht: 0x80
+
+    Stick Nach rechts Drücken mitte bis zum rand wieder mitte
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0x954 y=0x7AB
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0xBFC y=0x7E7
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0xCEE y=0x80F
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0xCF8 y=0x77F
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0xA8B y=0x6F4
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0x86A y=0x779
+    Stick nach oben drücken also von mitte nach oben wieder mitte
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0x872 y=0x87E
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0x871 y=0x99B
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0x862 y=0xB10
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0x85C y=0xC64
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0x86D y=0x78F
+    Stick nach links (links mitte links)
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0x68A y=0x790
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0x46D y=0x78F
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0x3B4 y=0x786
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0x84A y=0x789
+    Stick nach unten (unten mitte unten)
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0x7F3 y=0x4EC
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0x7A9 y=0x305
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0x7A9 y=0x4A0
+    [STICK] Joy-Con 2 (R) / Report 0x08: offset 0x05 -> x=0x859 y=0x786
+
+Tasten Links
