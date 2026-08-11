@@ -62,6 +62,14 @@ services:
       - clawmachine_network
     depends_on:
       - mqtt-broker
+    ports:
+      # Kamera-MJPEG-Stream (siehe [camera] in config.ini), von second_page
+      # per <img src="http://192.168.0.103:8000/camera/stream"> eingebunden
+      - "0.0.0.0:8000:8000"
+    devices:
+      # USB-Webcam am Host — Index prüfen (z.B. `v4l2-ctl --list-devices`),
+      # falls die Kamera nicht an /dev/video0 hängt
+      - "/dev/video0:/dev/video0"
 
 networks:
   clawmachine_network:
