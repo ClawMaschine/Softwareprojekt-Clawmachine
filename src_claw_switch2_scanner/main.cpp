@@ -134,19 +134,31 @@ static const Switch2ButtonMapping JOYCON_LEFT_BUTTON_MAPPINGS[] = {
 
 #define ARRAY_ELEMENT_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 
-// --- Steuerbelegung des linken Joy-Con --------------------------------------
+// --- Steuerbelegung beider Joy-Cons -----------------------------------------
 //
-// Dieselben Bitmasken wie in JOYCON_LEFT_BUTTON_MAPPINGS, hier nur unter dem
-// Namen, den die Clawmachine-Achse traegt. Steuerkreuz auf die horizontale
-// Ebene, L und ZL auf die Hoehe.
+// Beide Controller nutzen DIESELBEN Bitmasken - Nintendo hat die Tasten
+// identisch angeordnet. Das ist an beiden Geraeten gemessen:
+//
+//   Maske   linker Joy-Con        rechter Joy-Con        Lage am Geraet
+//   0x01    Steuerkreuz Unten     B                      unten
+//   0x02    Steuerkreuz Rechts    A                      rechts
+//   0x04    Steuerkreuz Links     Y                      links
+//   0x08    Steuerkreuz Oben      X                      oben
+//   0x10    L                     R                      obere Schulter
+//   0x20    ZL                    ZR                     hintere Schulter
+//
+// Deshalb genuegt eine Zuordnungsfunktion fuer beide Seiten.
 
-static constexpr uint8_t JOYCON_LEFT_BUTTON_BYTE      = 0x02;
-static constexpr uint8_t JOYCON_LEFT_MASK_DPAD_DOWN   = 0x01;
-static constexpr uint8_t JOYCON_LEFT_MASK_DPAD_RIGHT  = 0x02;
-static constexpr uint8_t JOYCON_LEFT_MASK_DPAD_LEFT   = 0x04;
-static constexpr uint8_t JOYCON_LEFT_MASK_DPAD_UP     = 0x08;
-static constexpr uint8_t JOYCON_LEFT_MASK_SHOULDER_L  = 0x10;
-static constexpr uint8_t JOYCON_LEFT_MASK_SHOULDER_ZL = 0x20;
+static constexpr uint8_t JOYCON_BUTTON_BYTE          = 0x02;
+static constexpr uint8_t JOYCON_MASK_DIRECTION_DOWN  = 0x01;
+static constexpr uint8_t JOYCON_MASK_DIRECTION_RIGHT = 0x02;
+static constexpr uint8_t JOYCON_MASK_DIRECTION_LEFT  = 0x04;
+static constexpr uint8_t JOYCON_MASK_DIRECTION_UP    = 0x08;
+static constexpr uint8_t JOYCON_MASK_SHOULDER_UPPER  = 0x10;  // L bzw. R
+static constexpr uint8_t JOYCON_MASK_SHOULDER_LOWER  = 0x20;  // ZL bzw. ZR
+
+// Ab welcher Auslenkung der Stick als Richtung gilt. Darunter passiert nichts.
+static constexpr int8_t JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT = 30;
 
 static constexpr const char *JOYCON_CONTROL_TOPIC = "clawmachine/player_input/joycon";
 
@@ -180,27 +192,6 @@ struct JoyConControlState
   }
 };
 
-static JoyConControlState readControlStateFromLeftJoyCon(const uint8_t *report, size_t length)
-{
-  JoyConControlState state;
-  if (length <= JOYCON_LEFT_BUTTON_BYTE)
-  {
-    return state;
-  }
-
-  const uint8_t buttons = report[JOYCON_LEFT_BUTTON_BYTE];
-
-  state.rightButton = (buttons & JOYCON_LEFT_MASK_DPAD_RIGHT) != 0;
-  state.leftButton  = (buttons & JOYCON_LEFT_MASK_DPAD_LEFT) != 0;
-  // Steuerkreuz oben schiebt den Greifer von der Bedienperson weg.
-  state.backButton  = (buttons & JOYCON_LEFT_MASK_DPAD_UP) != 0;
-  state.frontButton = (buttons & JOYCON_LEFT_MASK_DPAD_DOWN) != 0;
-  state.upButton    = (buttons & JOYCON_LEFT_MASK_SHOULDER_L) != 0;
-  state.downButton  = (buttons & JOYCON_LEFT_MASK_SHOULDER_ZL) != 0;
-
-  return state;
-}
-
 ClawMqttConnection mqttConnection(
     CLAW_CLIENT_WIFI_SSID,
     CLAW_CLIENT_WIFI_PASSWORD,
@@ -215,8 +206,49 @@ ClawMqttConnection mqttConnection(
 // Arduino-Task. PubSubClient ist nicht threadsicher, deshalb wird im Callback
 // nur der Zustand hinterlegt und im loop() publiziert - dasselbe Muster wie
 // bei pendingConnectAddress.
-static JoyConControlState pendingControlState;
+//
+// Je Controller ein eigener Zustand, damit beide zusammengefuehrt werden
+// koennen: gleichzeitiges Druecken links und rechts ergibt einen gemeinsamen
+// Befehl, statt dass sich beide gegenseitig ueberschreiben.
+static JoyConControlState leftControlState;
+static JoyConControlState rightControlState;
 static volatile bool      hasPendingControlState = false;
+
+static void storeControlState(Switch2ControllerType type, const JoyConControlState &state)
+{
+  if (type == Switch2ControllerType::JoyConLeft)
+  {
+    leftControlState = state;
+  }
+  else if (type == Switch2ControllerType::JoyConRight)
+  {
+    rightControlState = state;
+  }
+  else
+  {
+    return;
+  }
+  hasPendingControlState = true;
+}
+
+// Bei Verbindungsverlust muss der Zustand geloescht werden. Sonst bliebe eine
+// gehaltene Richtung stehen und die Maschine fuehre weiter.
+static void clearControlState(Switch2ControllerType type)
+{
+  if (type == Switch2ControllerType::JoyConLeft)
+  {
+    leftControlState = JoyConControlState();
+  }
+  else if (type == Switch2ControllerType::JoyConRight)
+  {
+    rightControlState = JoyConControlState();
+  }
+  else
+  {
+    return;
+  }
+  hasPendingControlState = true;
+}
 
 struct Switch2ReportDescription
 {
@@ -612,6 +644,66 @@ static void printStickDeflection(ReportTracker &tracker, const uint8_t *report, 
   tracker.hasPrintedDeflection  = true;
 }
 
+// Tasten und Stick eines Joy-Con in Steuerbefehle uebersetzen. Der Stick wirkt
+// wie ein zusaetzliches Steuerkreuz: ab der Schwelle gilt seine Richtung als
+// gedrueckt, damit er ohne Aenderung in das an/aus-Format des Panels passt.
+//
+// Die Achsen sind gegenueber den Tastennamen bewusst gespiegelt: Richtung
+// oben am Controller bewegt den Greifer nach vorne, Richtung rechts nach
+// links. Stick und Tasten folgen derselben Konvention, damit sich beides
+// gleich anfuehlt.
+static JoyConControlState readControlStateFromReport(const ReportTracker &tracker,
+                                                     const uint8_t       *report,
+                                                     size_t               length)
+{
+  JoyConControlState state;
+  if (length <= JOYCON_BUTTON_BYTE)
+  {
+    return state;
+  }
+
+  const uint8_t buttons = report[JOYCON_BUTTON_BYTE];
+
+  state.leftButton  = (buttons & JOYCON_MASK_DIRECTION_RIGHT) != 0;
+  state.rightButton = (buttons & JOYCON_MASK_DIRECTION_LEFT) != 0;
+  state.frontButton = (buttons & JOYCON_MASK_DIRECTION_UP) != 0;
+  state.backButton  = (buttons & JOYCON_MASK_DIRECTION_DOWN) != 0;
+  state.upButton    = (buttons & JOYCON_MASK_SHOULDER_UPPER) != 0;
+  state.downButton  = (buttons & JOYCON_MASK_SHOULDER_LOWER) != 0;
+
+  const bool canReadStick = tracker.hasStickCenter &&
+                            tracker.firstStickOffset != NO_STICK_OFFSET &&
+                            static_cast<size_t>(tracker.firstStickOffset) + 3 <= length;
+  if (!canReadStick)
+  {
+    return state;
+  }
+
+  const StickPosition raw = unpackPackedStickValues(&report[tracker.firstStickOffset]);
+  const int8_t horizontalPercent = convertAxisToPercent(raw.x, tracker.stickCenter.x);
+  const int8_t verticalPercent   = convertAxisToPercent(raw.y, tracker.stickCenter.y);
+
+  if (horizontalPercent >= JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
+  {
+    state.leftButton = true;   // Stick nach rechts
+  }
+  else if (horizontalPercent <= -JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
+  {
+    state.rightButton = true;  // Stick nach links
+  }
+
+  if (verticalPercent >= JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
+  {
+    state.frontButton = true;  // Stick nach oben
+  }
+  else if (verticalPercent <= -JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
+  {
+    state.backButton = true;   // Stick nach unten
+  }
+
+  return state;
+}
+
 // --- Kernstueck: Report vergleichen und Aenderungen ausgeben ----------------
 
 static void handleIncomingReport(ReportTracker &tracker, const uint8_t *report, size_t length)
@@ -747,14 +839,11 @@ static void handleIncomingReport(ReportTracker &tracker, const uint8_t *report, 
 
   printStickDeflection(tracker, report, usableLength);
 
-  // Nur der linke Joy-Con steuert die Maschine. Hier wird der Zustand lediglich
+  // Beide Joy-Cons steuern die Maschine. Hier wird der Zustand lediglich
   // hinterlegt; publiziert wird im loop(), weil PubSubClient nicht threadsicher
   // ist und dieser Callback im NimBLE-Host-Task laeuft.
-  if (tracker.controllerType == Switch2ControllerType::JoyConLeft)
-  {
-    pendingControlState    = readControlStateFromLeftJoyCon(report, usableLength);
-    hasPendingControlState = true;
-  }
+  storeControlState(tracker.controllerType,
+                    readControlStateFromReport(tracker, report, usableLength));
 
   memcpy(tracker.previousReport, report, usableLength);
   tracker.previousReportLength = usableLength;
@@ -769,8 +858,17 @@ static void publishPendingControlState()
     return;
   }
 
-  const JoyConControlState state = pendingControlState;
-  hasPendingControlState         = false;
+  hasPendingControlState = false;
+
+  // Beide Controller verodern: was auf einer der beiden Seiten gedrueckt ist,
+  // gilt. So funktioniert gleichzeitiges Bedienen sinnvoll.
+  JoyConControlState state;
+  state.upButton    = leftControlState.upButton    || rightControlState.upButton;
+  state.downButton  = leftControlState.downButton  || rightControlState.downButton;
+  state.leftButton  = leftControlState.leftButton  || rightControlState.leftButton;
+  state.rightButton = leftControlState.rightButton || rightControlState.rightButton;
+  state.frontButton = leftControlState.frontButton || rightControlState.frontButton;
+  state.backButton  = leftControlState.backButton  || rightControlState.backButton;
 
   if (!state.isValid())
   {
@@ -915,6 +1013,9 @@ class Switch2ClientCallbacks : public NimBLEClientCallbacks
     ControllerSession *session = findSessionByAddress(client->getPeerAddress());
     if (session != nullptr)
     {
+      // Zuerst die Steuerung stillsetzen: ohne das bliebe eine gehaltene
+      // Richtung stehen und die Maschine fuehre nach dem Abriss weiter.
+      clearControlState(session->type);
       session->isInUse = false;
     }
     NimBLEDevice::getScan()->start(0, false, true);
