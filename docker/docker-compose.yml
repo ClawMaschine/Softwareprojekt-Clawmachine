@@ -14,7 +14,8 @@ services:
     networks:
       - clawmachine_network
 
-  # DNS: leitet alle Anfragen auf 192.168.0.103 um → Clients landen im Frontend
+  # DNS: leitet alle Anfragen auf 192.168.0.103 um → Clients landen auf Port 80
+  # (second_page, siehe unten)
   captive-dns:
     build:
       context: ./captive-dns
@@ -24,7 +25,22 @@ services:
     # host-Netzwerk: Container bindet direkt auf 192.168.0.103:53 (Hotspot-Interface)
     network_mode: host
 
-  # Frontend: Angular-App, erreichbar unter http://192.168.0.103
+  # Second Page: statische Test-Seite (reines HTML, kein JS). Liegt bewusst auf
+  # Port 80 — dahin leitet captive-dns alle Anfragen um, das Angular-Frontend
+  # ist deshalb auf Port 8080 ausgewichen (siehe frontend-Service unten).
+  second_page:
+    build:
+      context: .. # Repo-Root (docker-compose liegt in docker/)
+      dockerfile: docker/second_page/Dockerfile
+    container_name: clawmachine-second-page
+    restart: unless-stopped
+    networks:
+      - clawmachine_network
+    ports:
+      - "0.0.0.0:80:80"
+
+  # Frontend: Angular-App, erreichbar unter http://192.168.0.103:8080
+  # (Port 80 ist second_page vorbehalten, siehe oben)
   frontend:
     build:
       context: .. # Repo-Root (docker-compose liegt in docker/)
@@ -34,7 +50,7 @@ services:
     networks:
       - clawmachine_network
     ports:
-      - "0.0.0.0:80:80"
+      - "0.0.0.0:8080:80"
 
   server:
     build:
