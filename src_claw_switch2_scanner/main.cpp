@@ -648,10 +648,10 @@ static void printStickDeflection(ReportTracker &tracker, const uint8_t *report, 
 // wie ein zusaetzliches Steuerkreuz: ab der Schwelle gilt seine Richtung als
 // gedrueckt, damit er ohne Aenderung in das an/aus-Format des Panels passt.
 //
-// Die Achsen sind gegenueber den Tastennamen bewusst gespiegelt: Richtung
-// oben am Controller bewegt den Greifer nach vorne, Richtung rechts nach
-// links. Stick und Tasten folgen derselben Konvention, damit sich beides
-// gleich anfuehlt.
+// Waagerecht stimmen Tastenname und Bewegung ueberein: links am Controller
+// bewegt den Greifer nach links. Die senkrechte Achse ist dagegen bewusst
+// gespiegelt, Richtung oben bewegt den Greifer nach hinten. Stick und Tasten
+// folgen derselben Konvention, damit sich beides gleich anfuehlt.
 static JoyConControlState readControlStateFromReport(const ReportTracker &tracker,
                                                      const uint8_t       *report,
                                                      size_t               length)
@@ -664,10 +664,10 @@ static JoyConControlState readControlStateFromReport(const ReportTracker &tracke
 
   const uint8_t buttons = report[JOYCON_BUTTON_BYTE];
 
-  state.leftButton  = (buttons & JOYCON_MASK_DIRECTION_RIGHT) != 0;
-  state.rightButton = (buttons & JOYCON_MASK_DIRECTION_LEFT) != 0;
-  state.frontButton = (buttons & JOYCON_MASK_DIRECTION_UP) != 0;
-  state.backButton  = (buttons & JOYCON_MASK_DIRECTION_DOWN) != 0;
+  state.leftButton  = (buttons & JOYCON_MASK_DIRECTION_LEFT) != 0;
+  state.rightButton = (buttons & JOYCON_MASK_DIRECTION_RIGHT) != 0;
+  state.frontButton = (buttons & JOYCON_MASK_DIRECTION_DOWN) != 0;
+  state.backButton  = (buttons & JOYCON_MASK_DIRECTION_UP) != 0;
   state.upButton    = (buttons & JOYCON_MASK_SHOULDER_UPPER) != 0;
   state.downButton  = (buttons & JOYCON_MASK_SHOULDER_LOWER) != 0;
 
@@ -685,20 +685,20 @@ static JoyConControlState readControlStateFromReport(const ReportTracker &tracke
 
   if (horizontalPercent >= JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
   {
-    state.leftButton = true;   // Stick nach rechts
+    state.rightButton = true;  // Stick nach rechts
   }
   else if (horizontalPercent <= -JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
   {
-    state.rightButton = true;  // Stick nach links
+    state.leftButton = true;   // Stick nach links
   }
 
   if (verticalPercent >= JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
   {
-    state.frontButton = true;  // Stick nach oben
+    state.backButton = true;   // Stick nach oben
   }
   else if (verticalPercent <= -JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
   {
-    state.backButton = true;   // Stick nach unten
+    state.frontButton = true;  // Stick nach unten
   }
 
   return state;
