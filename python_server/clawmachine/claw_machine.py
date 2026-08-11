@@ -193,9 +193,9 @@ class ClawMachine:
                 self.panel_button_state.update(panel_buttons)
 
                 if self.panel_button_state.get("right"):
-                    x_speed = -PANEL_MOTOR_SPEED
-                elif self.panel_button_state.get("left"):
                     x_speed = PANEL_MOTOR_SPEED
+                elif self.panel_button_state.get("left"):
+                    x_speed = -PANEL_MOTOR_SPEED
                 else:
                     x_speed = 0
 
