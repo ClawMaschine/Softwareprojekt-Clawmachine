@@ -7,9 +7,11 @@ import tty
 try:
     from python_server.mqtt import MQTTClient
     from python_server.configuration_loader import load_mqtt_configuration
+    from python_server.clawmachine.claw_machine import CONTROL_TOPIC
 except ModuleNotFoundError:
     from mqtt import MQTTClient
     from configuration_loader import load_mqtt_configuration
+    from clawmachine.claw_machine import CONTROL_TOPIC
 
 DEVICE_NAME = "steering"
 SPEED = 80
@@ -70,8 +72,7 @@ def connect():
         password=mqtt_configuration.password,
     )
     mqtt_client.connect()
-    mqtt_client.publish(mqtt_configuration.device_added_topic, DEVICE_NAME)
-    return mqtt_client, mqtt_configuration.topic
+    return mqtt_client, CONTROL_TOPIC
 
 
 def main():
