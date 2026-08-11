@@ -1,5 +1,5 @@
 import { Injectable, NgZone, OnDestroy } from '@angular/core';
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, Subscription, interval } from 'rxjs';
 import mqtt, { MqttClient } from 'mqtt';
 import { environment } from '../../environments/environment';
 
@@ -24,11 +24,22 @@ export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'er
 // MOTOR_COMMAND_PREFIXES in python_server/clawmachine/claw_machine.py).
 const CONTROL_TOPIC = 'clawmachine/web_interface/command';
 
-const KNOWN_DEVICES: Record<string, string> = {
+// Nur für die Anzeige — welche Geräte tatsächlich existieren, weiß allein
+// der Server (DeviceRegistry). Fehlt ein Name hier, wird einfach der rohe
+// Gerätename als Label angezeigt.
+const DEVICE_LABELS: Record<string, string> = {
   motor_controller: 'Motor Controller',
   web_interface:    'Web Interface',
   player_input:     'Player Input',
 };
+
+// Geräteliste: das Webinterface fragt aktiv beim Server nach (statt der
+// Server sie ungefragt zu pushen) und bekommt den aktuellen Stand der
+// server-seitigen DeviceRegistry als JSON-Array zurück — siehe
+// DEVICE_LIST_REQUEST_TOPIC/DEVICE_LIST_TOPIC in claw_machine.py.
+const DEVICE_LIST_REQUEST_TOPIC = 'clawmachine/web_interface/devices/request';
+const DEVICE_LIST_TOPIC = 'clawmachine/web_interface/devices';
+const DEVICE_LIST_REFRESH_INTERVAL_MS = 5000;
 
 // Wie bei den ESP-Boards: eigenes Status-Topic mit Last-Will (siehe
 // ClawMqttConnection::ensureMqttConnected in claw_mqtt_connection.cpp) —
@@ -36,20 +47,27 @@ const KNOWN_DEVICES: Record<string, string> = {
 // mit Online/Offline-Status im Dashboard zeigen, nicht nur Befehle senden.
 const STATUS_TOPIC = 'clawmachine/claw_web_interface/status';
 
+interface DeviceListEntry {
+  name: string;
+  isOnline: boolean;
+  uptimeMilliseconds: number | null;
+  addedAtUnixSeconds: number | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class MqttService implements OnDestroy {
   private client: MqttClient | null = null;
 
   readonly connectionStatus$ = new BehaviorSubject<ConnectionStatus>('disconnected');
 
-  readonly devices$ = new BehaviorSubject<DeviceState[]>(
-    Object.entries(KNOWN_DEVICES).map(([id, label]) => ({
-      id, label, isOnline: false, uptimeMs: null, lastSeen: null,
-    }))
-  );
+  // Startet leer — welche Geräte es gibt, erfährt das Webinterface nicht durch
+  // Raten, sondern ausschließlich über die Antwort auf DEVICE_LIST_REQUEST_TOPIC.
+  readonly devices$ = new BehaviorSubject<DeviceState[]>([]);
 
   readonly commandLog$ = new BehaviorSubject<MessageLog[]>([]);
   readonly inputLog$   = new BehaviorSubject<MessageLog[]>([]);
+
+  private deviceListRefreshSubscription: Subscription | null = null;
 
   constructor(private ngZone: NgZone) {}
 
@@ -79,6 +97,13 @@ export class MqttService implements OnDestroy {
       this.client!.subscribe('clawmachine/claw_motor_controller/command');
       this.client!.subscribe('clawmachine/claw_web_interface/command');
       this.client!.subscribe('clawmachine/claw_player_input/+');
+      this.client!.subscribe(DEVICE_LIST_TOPIC);
+
+      this.requestDeviceList();
+      this.deviceListRefreshSubscription?.unsubscribe();
+      this.deviceListRefreshSubscription = interval(DEVICE_LIST_REFRESH_INTERVAL_MS).subscribe(
+        () => this.requestDeviceList(),
+      );
     });
 
     this.client.on('message', (topic: string, payload: Buffer) => {
@@ -105,6 +130,18 @@ export class MqttService implements OnDestroy {
     this.client?.publish(STATUS_TOPIC, 'offline', { retain: true });
     this.client?.end();
     this.client = null;
+
+    this.deviceListRefreshSubscription?.unsubscribe();
+    this.deviceListRefreshSubscription = null;
+  }
+
+  // Anfrage an den Server — die Antwort kommt asynchron über DEVICE_LIST_TOPIC
+  // (siehe handleMessage) rein, nicht als Rückgabewert dieser Methode.
+  requestDeviceList(): void {
+    if (!this.client || !this.client.connected) {
+      return;
+    }
+    this.client.publish(DEVICE_LIST_REQUEST_TOPIC, '');
   }
 
   publishCommand(command: string): void {
@@ -115,6 +152,11 @@ export class MqttService implements OnDestroy {
   }
 
   private handleMessage(topic: string, payload: string): void {
+    if (topic === DEVICE_LIST_TOPIC) {
+      this.applyDeviceList(payload);
+      return;
+    }
+
     const parts = topic.split('/');
 
     if (parts.length === 3 && parts[2] === 'status') {
@@ -139,21 +181,50 @@ export class MqttService implements OnDestroy {
     }
   }
 
+  // Antwort auf eine requestDeviceList()-Anfrage — ersetzt die Geräteliste
+  // durch den server-seitigen Stand (einzige Quelle der Wahrheit dafür,
+  // WELCHE Geräte es gibt). lastSeen bleibt dabei erhalten, falls schon aus
+  // einem Live-Update (Status/Uptime, siehe updateDevice) bekannt, damit ein
+  // periodischer Refresh nicht auf den Registrierungszeitpunkt zurückspringt.
+  private applyDeviceList(payload: string): void {
+    let entries: DeviceListEntry[];
+    try {
+      entries = JSON.parse(payload);
+    } catch {
+      return;
+    }
+
+    const current = this.devices$.value;
+    const next = entries.map((entry): DeviceState => {
+      const existing = current.find(d => d.id === entry.name);
+      return {
+        id: entry.name,
+        label: DEVICE_LABELS[entry.name] ?? entry.name,
+        isOnline: entry.isOnline,
+        uptimeMs: entry.uptimeMilliseconds,
+        lastSeen:
+          existing?.lastSeen ??
+          (entry.addedAtUnixSeconds ? new Date(entry.addedAtUnixSeconds * 1000) : null),
+      };
+    });
+    this.devices$.next(next);
+  }
+
+  // Aktualisiert nur bereits bekannte Geräte (Live-Update zwischen zwei
+  // Geräteliste-Anfragen). Taucht hier ein noch unbekannter Gerätename auf,
+  // wird er NICHT einfach lokal erfunden — welche Geräte es gibt, bestimmt
+  // ausschließlich der Server (siehe applyDeviceList); der nächste periodische
+  // requestDeviceList() holt ihn dann korrekt nach.
   private updateDevice(id: string, patch: Partial<DeviceState>): void {
     const current = this.devices$.value;
     const idx = current.findIndex(d => d.id === id);
-
-    if (idx >= 0) {
-      const updated = [...current];
-      updated[idx] = { ...updated[idx], ...patch };
-      this.devices$.next(updated);
-    } else {
-      // Unknown device discovered via MQTT
-      this.devices$.next([
-        ...current,
-        { id, label: id, isOnline: false, uptimeMs: null, lastSeen: null, ...patch },
-      ]);
+    if (idx < 0) {
+      return;
     }
+
+    const updated = [...current];
+    updated[idx] = { ...updated[idx], ...patch };
+    this.devices$.next(updated);
   }
 
   private appendLog(
@@ -167,5 +238,6 @@ export class MqttService implements OnDestroy {
 
   ngOnDestroy(): void {
     this.client?.end();
+    this.deviceListRefreshSubscription?.unsubscribe();
   }
 }
