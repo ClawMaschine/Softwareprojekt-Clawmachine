@@ -47,7 +47,7 @@ PLAYER_INPUT_PANEL_TOPIC = "clawmachine/player_input/panel"
 PLAYER_INPUT_JOYCON_TOPIC = "clawmachine/player_input/joycon"
 PLAYER_INPUT_TOPICS = (PLAYER_INPUT_PANEL_TOPIC, PLAYER_INPUT_JOYCON_TOPIC)
 WEBINTERFACE_COMMAND_TOPIC = "clawmachine/web_interface/command"
-PANEL_MOTOR_SPEED = 80
+PANEL_MOTOR_SPEED = 130
 
 
 def extract_esp_name_from_topic(topic: str, suffix: str) -> Optional[str]:
