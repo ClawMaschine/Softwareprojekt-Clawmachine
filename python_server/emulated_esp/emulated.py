@@ -19,7 +19,6 @@ mqtt_client = MQTTClient(
     password=mqtt_configuration.password,
 )
 mqtt_client.connect()
-mqtt_client.publish(mqtt_configuration.device_added_topic, EMULATED_ESP_NAME)
 
 uptime_topic = f"clawmachine/{EMULATED_ESP_NAME}/metadata/uptime"
 started_at = time.time()

@@ -10,9 +10,8 @@ except ModuleNotFoundError:
 
 
 class DeviceRegistry:
-    def __init__(self, topic_prefix: str):
+    def __init__(self):
         self.devices_by_name: dict[str, EspDevice] = {}
-        self.topic_prefix = topic_prefix
 
     def add(self, device_name: str) -> Optional[EspDevice]:
         cleaned = device_name.strip()
@@ -33,5 +32,3 @@ class DeviceRegistry:
 
     def get(self, name: str) -> Optional[EspDevice]:
         return self.devices_by_name.get(name)
-    
-    
