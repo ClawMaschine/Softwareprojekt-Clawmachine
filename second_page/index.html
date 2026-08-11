@@ -22,12 +22,15 @@
     h1 { font-size: 2.5rem; margin-bottom: 0; }
     p  { color: #8b949e; margin: 0; }
 
-    /* MJPEG-Stream aus python_server/webserver.py — reines <img>, kein JS
-       nötig, der Browser aktualisiert das Bild bei einem
-       multipart/x-mixed-replace-Response von selbst. */
-    .camera-stream {
+    /* camera-frame.html refresht sich per <meta http-equiv="refresh"> selbst
+       neu und holt dabei ein frisches Einzelbild (siehe webserver.py) — ein
+       "Diashow"-Livebild ganz ohne JavaScript. Kein direkter MJPEG-<img>
+       mehr: multipart/x-mixed-replace wird von manchen Captive-Portal-
+       Browsern (z.B. Switch 2) gar nicht dargestellt. */
+    .camera-frame {
       max-width: 100%;
       width: 640px;
+      aspect-ratio: 4 / 3;
       border: 1px solid #30363d;
       border-radius: 8px;
       background: #161b22;
@@ -38,15 +41,8 @@
   <h1>🦾 Zweite Seite</h1>
   <p>Statisches HTML, kein JavaScript — läuft auf einem eigenen Port.</p>
 
-  <!-- Relativer Pfad statt fester Host:Port-URL — läuft über denselben
-       Origin wie diese Seite selbst (nginx reicht /camera/stream intern an
-       den server-Container weiter, siehe docker/second_page/nginx.conf).
-       Wichtig für Captive-Portal-Browser (z.B. Switch 2), die Requests auf
-       andere Ports als die Anmeldeseite oft blockieren. -->
-  <img
-    class="camera-stream"
-    src="/camera/stream"
-    alt="Live-Kamerabild der Klaue (nicht verfügbar, falls Server/Kamera gerade nicht laufen)"
-  >
+  <!-- Eigenes, sich selbst refreshendes Dokument statt direktem <img> —
+       dadurch flackert nur das Bild, nicht die ganze Seite. -->
+  <iframe class="camera-frame" src="/camera-frame.html" title="Live-Kamerabild der Klaue"></iframe>
 </body>
 </html>

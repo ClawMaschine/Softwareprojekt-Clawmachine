@@ -2,7 +2,7 @@ import time
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.responses import StreamingResponse
 
 try:
@@ -62,6 +62,29 @@ def camera_stream():
     return StreamingResponse(
         generate_mjpeg_frames(),
         media_type=f"multipart/x-mixed-replace; boundary={MJPEG_STREAM_BOUNDARY}",
+    )
+
+
+# Einzelbild statt Dauer-Stream — für Browser, die multipart/x-mixed-replace
+# im <img> nicht unterstützen (z.B. der Captive-Portal-Browser der Switch 2).
+# second_page/camera-frame.html fragt das per <meta http-equiv="refresh">
+# alle paar Sekunden neu ab, das ergibt einen "Diashow"-artigen Live-Eindruck
+# ganz ohne JavaScript.
+@app.get("/camera/snapshot")
+def camera_snapshot():
+    if not camera.is_open():
+        return Response(status_code=503)
+
+    jpeg_bytes = camera.read_jpeg_frame()
+    if jpeg_bytes is None:
+        return Response(status_code=503)
+
+    return Response(
+        content=jpeg_bytes,
+        media_type="image/jpeg",
+        # Ohne das würde ein Browser das Bild bei jedem Refresh aus dem Cache
+        # zeigen statt ein neues abzuholen — dann bliebe es beim ersten Frame stehen.
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
     )
 
 
