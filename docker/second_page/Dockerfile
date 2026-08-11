@@ -5,5 +5,6 @@
 FROM nginx:alpine
 
 COPY second_page/ /usr/share/nginx/html
+COPY docker/second_page/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80

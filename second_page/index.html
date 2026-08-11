@@ -38,9 +38,14 @@
   <h1>🦾 Zweite Seite</h1>
   <p>Statisches HTML, kein JavaScript — läuft auf einem eigenen Port.</p>
 
+  <!-- Relativer Pfad statt fester Host:Port-URL — läuft über denselben
+       Origin wie diese Seite selbst (nginx reicht /camera/stream intern an
+       den server-Container weiter, siehe docker/second_page/nginx.conf).
+       Wichtig für Captive-Portal-Browser (z.B. Switch 2), die Requests auf
+       andere Ports als die Anmeldeseite oft blockieren. -->
   <img
     class="camera-stream"
-    src="http://192.168.0.103:8000/camera/stream"
+    src="/camera/stream"
     alt="Live-Kamerabild der Klaue (nicht verfügbar, falls Server/Kamera gerade nicht laufen)"
   >
 </body>

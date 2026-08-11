@@ -38,6 +38,8 @@ services:
       - clawmachine_network
     ports:
       - "0.0.0.0:80:80"
+    depends_on:
+      - server
 
   # Frontend: Angular-App, erreichbar unter http://192.168.0.103:8080
   # (Port 80 ist second_page vorbehalten, siehe oben)
@@ -63,8 +65,10 @@ services:
     depends_on:
       - mqtt-broker
     ports:
-      # Kamera-MJPEG-Stream (siehe [camera] in config.ini), von second_page
-      # per <img src="http://192.168.0.103:8000/camera/stream"> eingebunden
+      # Kamera-MJPEG-Stream (siehe [camera] in config.ini). second_page nutzt
+      # das NICHT direkt (nginx proxied intern, siehe docker/second_page/
+      # nginx.conf) — dieser Host-Port ist nur noch fürs direkte Debuggen,
+      # z.B. curl http://192.168.0.103:8000/camera/stream
       - "0.0.0.0:8000:8000"
     devices:
       # USB-Webcam am Host — Index prüfen (z.B. `v4l2-ctl --list-devices`),
