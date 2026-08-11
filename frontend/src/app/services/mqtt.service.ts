@@ -26,7 +26,6 @@ const CONTROL_TOPIC = 'clawmachine/web_interface/command';
 
 const KNOWN_DEVICES: Record<string, string> = {
   motor_controller: 'Motor Controller',
-  control_panel:    'Control Panel',
   web_interface:    'Web Interface',
   player_input:     'Player Input',
 };
