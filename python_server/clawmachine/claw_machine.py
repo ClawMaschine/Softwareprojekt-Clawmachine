@@ -1,36 +1,28 @@
 from dataclasses import dataclass
 import json
+from logging import config
 import time
 from typing import Optional
 
+from python_server import clawmachine, mqtt
+from python_server.configuration_loader import load_clawmachine_configuration
+
 try:
     from python_server.configuration_loader import load_mqtt_configuration
-    from python_server.esp.mqtt_esp_controller import MQTTEspController
     from python_server.mqtt import MQTTClient
     from python_server.clawmachine.device_registry import DeviceRegistry
 except ModuleNotFoundError:
     from configuration_loader import load_mqtt_configuration
-    from esp.mqtt_esp_controller import MQTTEspController
     from mqtt import MQTTClient
     from device_registry import DeviceRegistry
 
-KNOWN_ESP_NAMES = ["motor_controller", "control_panel", "web_interface"]
 
 CLAWMACHINE_TOPIC_PREFIX = "clawmachine/"
 
-METADATA_UPTIME_TOPIC_WILDCARD = "clawmachine/+/metadata/uptime"
-METADATA_UPTIME_TOPIC_SUFFIX = "/metadata/uptime"
-
-INTERNAL_TOPIC_WILDCARD = "clawmachine/+/internal"
-INTERNAL_TOPIC_SUFFIX = "/internal"
-
-DEVICE_STATUS_TOPIC_WILDCARD = "clawmachine/+/status"
 DEVICE_STATUS_TOPIC_SUFFIX = "/status"
 
 MOTOR_CONTROLLER_COMMAND_TOPIC = "clawmachine/motor_controller/motor/command"
-# JSON-Settings-Update für den Motor-Controller (z.B. Beschleunigung) —
-# separates Topic von den X:/Y:/Z:/claw:-Bewegungsbefehlen, siehe
-# onMqttMessage() in src_claw_motor_controller/main.cpp.
+
 MOTOR_CONTROLLER_SETTINGS_TOPIC = "clawmachine/motor_controller/settings"
 MOTOR_COMMAND_PREFIXES = ("X:", "Y:", "Z:", "claw:")
 
@@ -49,33 +41,28 @@ def extract_esp_name_from_topic(topic: str, suffix: str) -> Optional[str]:
 class ClawMachine:
 
     def __init__(self):
-
+        self.config = load_clawmachine_configuration()
         mqtt_configuration = load_mqtt_configuration()
+        self.metadata_uptime_topic = "clawmachine/+" + self.config.uptime_topic_suffix
+        print(f"Metadata uptime topic: {self.metadata_uptime_topic}")
         self.control_topic = mqtt_configuration.topic
         self.device_registry = DeviceRegistry(
-            known_esp_names=KNOWN_ESP_NAMES,
-            device_added_topic=mqtt_configuration.device_added_topic,
+            topic_prefix=CLAWMACHINE_TOPIC_PREFIX
         )
         self.mqtt_client = MQTTClient(
             client_id=mqtt_configuration.client_id,
-            broker="mqtt-broker",
+            broker=mqtt_configuration.broker,
             port=mqtt_configuration.port,
             connect_timeout_seconds=mqtt_configuration.connect_timeout_seconds,
             username=mqtt_configuration.username,
             password=mqtt_configuration.password,
         )
         self.mqtt_client.connect()
-        self.esp_controller = MQTTEspController(self.mqtt_client)
 
-        # Der Player-Input-Controller schickt beim Panel nur noch die Tasten,
-        # die sich seit der letzten Nachricht geändert haben (Delta statt
-        # komplettem Zustand) — deshalb hier den vollständigen Zustand über
-        # mehrere Nachrichten hinweg mitführen, statt ihn pro Nachricht neu
-        # zu berechnen.
+
         self.panel_button_state = {}
 
         self.setup_message_handlers()
-        self.mqtt_client.publish(self.control_topic, "open")
 
         self.main_loop_started_at = time.time()
         self.main_loop()
@@ -85,10 +72,6 @@ class ClawMachine:
         if mqtt_network_client is None:
             raise RuntimeError("MQTT client is not connected. Call connect() first.")
         mqtt_network_client.subscribe(self.control_topic)
-        mqtt_network_client.subscribe(self.device_registry.device_added_topic)
-        mqtt_network_client.subscribe(METADATA_UPTIME_TOPIC_WILDCARD)
-        mqtt_network_client.subscribe(INTERNAL_TOPIC_WILDCARD)
-        mqtt_network_client.subscribe(DEVICE_STATUS_TOPIC_WILDCARD)
         mqtt_network_client.subscribe(PLAYER_INPUT_PANEL_TOPIC)
         mqtt_network_client.subscribe(WEBINTERFACE_COMMAND_TOPIC)
         mqtt_network_client.on_message = self.on_message
@@ -125,24 +108,15 @@ class ClawMachine:
                     topic, payload_text
                 )
             ) is not None:
-                self.device_registry.register(added_device_name)
+                self.device_registry.add(added_device_name)
 
             # 2) Heartbeat/Laufzeit eines Geräts (clawmachine/<name>/metadata/uptime)
             case _ if (
-                esp_name := extract_esp_name_from_topic(topic, METADATA_UPTIME_TOPIC_SUFFIX)
+                esp_name := extract_esp_name_from_topic(topic, self.metadata_uptime_topic)
             ) is not None:
                 device = self.device_registry.get(esp_name)
                 if device is not None:
                     device.metadata.uptime_milliseconds = int(payload_text)
-
-            # 3) Geräte-interne Nachricht, wird an das jeweilige EspDevice weitergereicht
-            #    (clawmachine/<name>/internal)
-            case _ if (
-                esp_name := extract_esp_name_from_topic(topic, INTERNAL_TOPIC_SUFFIX)
-            ) is not None:
-                device = self.device_registry.get(esp_name)
-                if device is not None:
-                    device.on_message(topic, payload_text)
 
             # 4) Online/Offline-Status eines Geräts, meist über LWT (Last Will) gesetzt
             #    (clawmachine/<name>/status)
@@ -226,14 +200,4 @@ class ClawMachine:
         while True:
             time.sleep(1)
 
-    def move_to(self, x, y):
-        self.position = (x, y)
-        print(f"Moved to position: {self.position}")
 
-    def open_claw(self):
-        self.is_claw_open = True
-        print("Claw opened")
-
-    def close_claw(self):
-        self.is_claw_open = False
-        print("Claw closed")
