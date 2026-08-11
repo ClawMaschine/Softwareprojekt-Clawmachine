@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 import time
 from typing import Optional
 
@@ -13,7 +14,9 @@ except ModuleNotFoundError:
     from mqtt import MQTTClient
     from device_registry import DeviceRegistry
 
-KNOWN_ESP_NAMES = ["motor_controller", "control_panel"]
+KNOWN_ESP_NAMES = ["motor_controller", "control_panel", "web_interface"]
+
+KNOWN_CONTROLL_DEVICES = [ "player_input", "web_interface" ]
 
 CLAWMACHINE_TOPIC_PREFIX = "clawmachine/"
 
@@ -28,6 +31,11 @@ DEVICE_STATUS_TOPIC_SUFFIX = "/status"
 
 MOTOR_CONTROLLER_COMMAND_TOPIC = "clawmachine/motor_controller/motor/command"
 MOTOR_COMMAND_PREFIXES = ("X:", "Y:", "Z:", "claw:")
+
+CONTROL_TOPIC = {device: f"clawmachine/{device}/control" for device in KNOWN_CONTROLL_DEVICES}
+
+PLAYER_INPUT_PANEL_TOPIC = "clawmachine/player_input/panel"
+PANEL_MOTOR_SPEED = 80
 
 
 def extract_esp_name_from_topic(topic: str, suffix: str) -> Optional[str]:
@@ -58,6 +66,13 @@ class ClawMachine:
         self.mqtt_client.connect()
         self.esp_controller = MQTTEspController(self.mqtt_client)
 
+        # Der Player-Input-Controller schickt beim Panel nur noch die Tasten,
+        # die sich seit der letzten Nachricht geändert haben (Delta statt
+        # komplettem Zustand) — deshalb hier den vollständigen Zustand über
+        # mehrere Nachrichten hinweg mitführen, statt ihn pro Nachricht neu
+        # zu berechnen.
+        self.panel_button_state = {}
+
         self.setup_message_handlers()
         self.mqtt_client.publish(self.control_topic, "open")
 
@@ -73,6 +88,9 @@ class ClawMachine:
         mqtt_network_client.subscribe(METADATA_UPTIME_TOPIC_WILDCARD)
         mqtt_network_client.subscribe(INTERNAL_TOPIC_WILDCARD)
         mqtt_network_client.subscribe(DEVICE_STATUS_TOPIC_WILDCARD)
+        mqtt_network_client.subscribe(PLAYER_INPUT_PANEL_TOPIC)
+        for topic in CONTROL_TOPIC.values():
+            mqtt_network_client.subscribe(topic)
         mqtt_network_client.on_message = self.on_message
 
     def on_message(self, _client, _userdata, message):
@@ -87,12 +105,20 @@ class ClawMachine:
         payload_text = message.payload.decode("utf-8", errors="replace").strip()
         print(f"Received message on topic '{topic}': {payload_text}")
 
-        device = self.device_registry.get_by_topic(topic)
         # switch/case über die Topic-Art. `case _ if ...` prüft "passt das Topic
         # zu mir?" (per Walrus gleich mit dem extrahierten Wert), der erste
         # Treffer gewinnt, kein Fallthrough — der abschließende `case _` ist
         # der Default für alles, was zu keinem bekannten Topic passt.
         match topic:
+            case _ if topic == CONTROL_TOPIC:
+                self.on_control_command(topic, payload_text)
+            # 7) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
+            #    Haupt-Steuertopic — unverändert an den Motor-Controller weiterleiten
+            case _ if topic == self.control_topic and payload_text.startswith(
+                MOTOR_COMMAND_PREFIXES
+            ):
+                self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
+
             # 1) Neues/erneut verbundenes ESP32-Gerät meldet sich (clawmachine/device/added)
             case _ if (
                 added_device_name := self.device_registry.extract_device_name(
@@ -126,20 +152,55 @@ class ClawMachine:
                 device = self.device_registry.get(esp_name)
                 if device is not None:
                     device.is_online = payload_text == "online"
-
-            # 5) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
-            #    Haupt-Steuertopic — unverändert an den Motor-Controller weiterleiten
-            case _ if topic == self.control_topic and payload_text.startswith(
-                MOTOR_COMMAND_PREFIXES
-            ):
-                self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
-
+                    
             # Steuertopic, aber kein bekannter Befehl
             case _ if topic == self.control_topic:
                 print(f"Unknown control command: {payload_text}")
+
             # Default: passt zu keinem der obigen Topics — ignorieren
             case _:
                 pass
+
+    def on_control_command(self, topic: str, payload_text: str):
+        
+        match topic:
+            case _ if topic == PLAYER_INPUT_PANEL_TOPIC:
+                panel_buttons = json.loads(payload_text)
+                self.panel_button_state.update(panel_buttons)
+
+                if self.panel_button_state.get("right"):
+                    x_speed = -PANEL_MOTOR_SPEED
+                elif self.panel_button_state.get("left"):
+                    x_speed = PANEL_MOTOR_SPEED
+                else:
+                    x_speed = 0
+
+                if self.panel_button_state.get("back"):
+                    y_speed = PANEL_MOTOR_SPEED
+                elif self.panel_button_state.get("front"):
+                    y_speed = -PANEL_MOTOR_SPEED
+                else:
+                    y_speed = 0
+
+                self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"X:{x_speed}")
+                self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"Y:{y_speed}")
+
+            # 6) Steuerbefehl vom Webinterface (z.B. "left:80", "front:-80",
+            #    "claw:open") — das Webinterface rechnet die Geschwindigkeit
+            #    schon selbst aus (siehe app.component.ts), der Server muss
+            #    hier nur noch den Tastennamen auf die Motor-Achse mappen.
+            case _ if topic == WEBINTERFACE_COMMAND_TOPIC:
+                name, _, value = payload_text.strip().partition(":")
+
+                if name == "claw":
+                    self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
+                elif name in ("left", "right"):
+                    self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"X:{value}")
+                elif name in ("front", "back"):
+                    self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"Y:{value}")
+                else:
+                    print(f"Unknown webinterface command: {payload_text}")
+
 
     def main_loop(self):
         while True:
