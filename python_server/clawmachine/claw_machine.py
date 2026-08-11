@@ -33,6 +33,12 @@ DEVICE_STATUS_TOPIC_SUFFIX = "/status"
 # Uptime-Heartbeat, Status) auftaucht, und bestätigt das hierüber.
 DEVICE_REGISTERED_TOPIC_SUFFIX = "/registered"
 
+# Geräteliste fürs Webinterface: Anfrage/Antwort statt Server-seitigem Push —
+# das Webinterface fragt aktiv nach (leerer Payload reicht), der Server
+# antwortet mit dem aktuellen Stand der DeviceRegistry als JSON-Array.
+DEVICE_LIST_REQUEST_TOPIC = "clawmachine/web_interface/devices/request"
+DEVICE_LIST_TOPIC = "clawmachine/web_interface/devices"
+
 MOTOR_CONTROLLER_COMMAND_TOPIC = "clawmachine/motor_controller/motor/command"
 # JSON-Settings-Update für den Motor-Controller (z.B. Beschleunigung) —
 # separates Topic von den X:/Y:/Z:/claw:-Bewegungsbefehlen, siehe
@@ -98,6 +104,7 @@ class ClawMachine:
         mqtt_network_client.subscribe(PLAYER_INPUT_PANEL_TOPIC)
         mqtt_network_client.subscribe(PLAYER_INPUT_JOYCON_TOPIC)
         mqtt_network_client.subscribe(WEBINTERFACE_COMMAND_TOPIC)
+        mqtt_network_client.subscribe(DEVICE_LIST_REQUEST_TOPIC)
         mqtt_network_client.on_message = self.on_message
 
     def ensure_device_registered(self, esp_name: str) -> Optional[EspDevice]:
@@ -114,6 +121,12 @@ class ClawMachine:
             )
             self.mqtt_client.publish(registered_topic, "ok")
         return device
+
+    def publish_device_list(self):
+        # Antwort auf DEVICE_LIST_REQUEST_TOPIC — wird nur auf Anfrage
+        # geschickt, nicht automatisch bei jeder Änderung der Registry.
+        devices = [device.to_dict() for device in self.device_registry.devices_by_name.values()]
+        self.mqtt_client.publish(DEVICE_LIST_TOPIC, json.dumps(devices))
 
     def on_message(self, _client, _userdata, message):
         # Callback von paho-mqtt für JEDE Nachricht auf einem abonnierten Topic
@@ -134,6 +147,10 @@ class ClawMachine:
         match topic:
             case _ if topic in PLAYER_INPUT_TOPICS or topic == WEBINTERFACE_COMMAND_TOPIC:
                 self.on_control_command(topic, payload_text)
+
+            # Webinterface fragt aktiv nach der aktuellen Geräteliste
+            case _ if topic == DEVICE_LIST_REQUEST_TOPIC:
+                self.publish_device_list()
             # 7) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
             #    Haupt-Steuertopic — unverändert an den Motor-Controller weiterleiten
             case _ if topic == self.control_topic and payload_text.startswith(
