@@ -3,6 +3,9 @@
 
 #include <string.h>
 
+#include "claw_mqtt_connection.h"
+#include "firmware_config.h"
+
 // ============================================================================
 // Stufe 1: Rohsignale eines Nintendo-Switch-2-Controllers abfangen.
 //
@@ -31,7 +34,15 @@
 // Controller die Verbindung sofort, wenn der Host das versucht. Deshalb
 // setSecurityAuth(false, false, false) und kein secureConnection().
 //
+// Zusaetzlich sendet diese Firmware die Steuerbefehle des LINKEN Joy-Con per
+// MQTT an den Python-Server - im selben Format, das der Server vom Control-
+// Panel kennt, sodass dort keine neue Auswertelogik noetig ist. Das ist
+// bewusst dieselbe Rolle, die src_claw_panel_test beim Panel hatte: eine
+// Testfirmware, die auf das echte Topic sendet. Der Umbau nach
+// src_claw_player_input kommt spaeter.
+//
 // Serielle Kommandos zur Laufzeit (kein Neuflashen noetig):
+//   b = Tastennamen / rohe Bitmasken
 //   d = kompletten Hexdump jedes Reports an/aus
 //   r = Referenzwerte und Rauschliste zuruecksetzen (Controller ruhig halten)
 //   s = Stick-Dekodierung an/aus
@@ -123,6 +134,90 @@ static const Switch2ButtonMapping JOYCON_LEFT_BUTTON_MAPPINGS[] = {
 
 #define ARRAY_ELEMENT_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 
+// --- Steuerbelegung des linken Joy-Con --------------------------------------
+//
+// Dieselben Bitmasken wie in JOYCON_LEFT_BUTTON_MAPPINGS, hier nur unter dem
+// Namen, den die Clawmachine-Achse traegt. Steuerkreuz auf die horizontale
+// Ebene, L und ZL auf die Hoehe.
+
+static constexpr uint8_t JOYCON_LEFT_BUTTON_BYTE      = 0x02;
+static constexpr uint8_t JOYCON_LEFT_MASK_DPAD_DOWN   = 0x01;
+static constexpr uint8_t JOYCON_LEFT_MASK_DPAD_RIGHT  = 0x02;
+static constexpr uint8_t JOYCON_LEFT_MASK_DPAD_LEFT   = 0x04;
+static constexpr uint8_t JOYCON_LEFT_MASK_DPAD_UP     = 0x08;
+static constexpr uint8_t JOYCON_LEFT_MASK_SHOULDER_L  = 0x10;
+static constexpr uint8_t JOYCON_LEFT_MASK_SHOULDER_ZL = 0x20;
+
+static constexpr const char *JOYCON_CONTROL_TOPIC = "clawmachine/player_input/joycon";
+
+// Feldnamen und Bedeutung sind bewusst identisch zu PanelInput, damit der
+// Python-Server dieselbe Auswertung nutzen kann (siehe on_control_command in
+// python_server/clawmachine/claw_machine.py).
+struct JoyConControlState
+{
+  bool upButton    = false;
+  bool downButton  = false;
+  bool leftButton  = false;
+  bool rightButton = false;
+  bool frontButton = false;
+  bool backButton  = false;
+
+  // Gegensaetzliche Richtungen derselben Achse gleichzeitig ergeben keinen
+  // sinnvollen Motorbefehl. Spiegelt PanelInput::isValid().
+  bool isValid() const
+  {
+    if (leftButton && rightButton) return false;
+    if (frontButton && backButton) return false;
+    if (upButton && downButton)    return false;
+    return true;
+  }
+
+  bool equals(const JoyConControlState &other) const
+  {
+    return upButton == other.upButton && downButton == other.downButton &&
+           leftButton == other.leftButton && rightButton == other.rightButton &&
+           frontButton == other.frontButton && backButton == other.backButton;
+  }
+};
+
+static JoyConControlState readControlStateFromLeftJoyCon(const uint8_t *report, size_t length)
+{
+  JoyConControlState state;
+  if (length <= JOYCON_LEFT_BUTTON_BYTE)
+  {
+    return state;
+  }
+
+  const uint8_t buttons = report[JOYCON_LEFT_BUTTON_BYTE];
+
+  state.rightButton = (buttons & JOYCON_LEFT_MASK_DPAD_RIGHT) != 0;
+  state.leftButton  = (buttons & JOYCON_LEFT_MASK_DPAD_LEFT) != 0;
+  // Steuerkreuz oben schiebt den Greifer von der Bedienperson weg.
+  state.backButton  = (buttons & JOYCON_LEFT_MASK_DPAD_UP) != 0;
+  state.frontButton = (buttons & JOYCON_LEFT_MASK_DPAD_DOWN) != 0;
+  state.upButton    = (buttons & JOYCON_LEFT_MASK_SHOULDER_L) != 0;
+  state.downButton  = (buttons & JOYCON_LEFT_MASK_SHOULDER_ZL) != 0;
+
+  return state;
+}
+
+ClawMqttConnection mqttConnection(
+    CLAW_CLIENT_WIFI_SSID,
+    CLAW_CLIENT_WIFI_PASSWORD,
+    CLAW_MQTT_BROKER_HOST,
+    CLAW_MQTT_BROKER_PORT,
+    "claw_switch2_scanner",
+    CLAW_MQTT_USER_USERNAME,
+    CLAW_MQTT_USER_PASSWORD,
+    CLAW_CONNECTION_RETRY_INTERVAL_MS);
+
+// Der Report-Callback laeuft im NimBLE-Host-Task, maintainConnection() im
+// Arduino-Task. PubSubClient ist nicht threadsicher, deshalb wird im Callback
+// nur der Zustand hinterlegt und im loop() publiziert - dasselbe Muster wie
+// bei pendingConnectAddress.
+static JoyConControlState pendingControlState;
+static volatile bool      hasPendingControlState = false;
+
 struct Switch2ReportDescription
 {
   Switch2ControllerType type;
@@ -213,6 +308,7 @@ struct ReportTracker
 {
   const char *controllerName;
   const char *reportName;
+  Switch2ControllerType controllerType;
   uint8_t firstStickOffset;
   uint8_t secondStickOffset;
 
@@ -651,8 +747,59 @@ static void handleIncomingReport(ReportTracker &tracker, const uint8_t *report, 
 
   printStickDeflection(tracker, report, usableLength);
 
+  // Nur der linke Joy-Con steuert die Maschine. Hier wird der Zustand lediglich
+  // hinterlegt; publiziert wird im loop(), weil PubSubClient nicht threadsicher
+  // ist und dieser Callback im NimBLE-Host-Task laeuft.
+  if (tracker.controllerType == Switch2ControllerType::JoyConLeft)
+  {
+    pendingControlState    = readControlStateFromLeftJoyCon(report, usableLength);
+    hasPendingControlState = true;
+  }
+
   memcpy(tracker.previousReport, report, usableLength);
   tracker.previousReportLength = usableLength;
+}
+
+// --- Steuerbefehle an den Python-Server -------------------------------------
+
+static void publishPendingControlState()
+{
+  if (!hasPendingControlState)
+  {
+    return;
+  }
+
+  const JoyConControlState state = pendingControlState;
+  hasPendingControlState         = false;
+
+  if (!state.isValid())
+  {
+    return;
+  }
+
+  // Nur bei Zustandswechsel senden. Bei rund 30 Reports pro Sekunde waere
+  // zyklisches Publizieren eine Flut - und es entlastet die Antenne, die sich
+  // WiFi und BLE teilen.
+  static JoyConControlState lastPublishedState;
+  static bool               hasPublishedOnce = false;
+
+  if (hasPublishedOnce && state.equals(lastPublishedState))
+  {
+    return;
+  }
+
+  char payload[160];
+  snprintf(payload, sizeof(payload),
+           "{\"up\":%d,\"down\":%d,\"left\":%d,\"right\":%d,\"front\":%d,\"back\":%d}",
+           state.upButton, state.downButton,
+           state.leftButton, state.rightButton,
+           state.frontButton, state.backButton);
+
+  mqttConnection.publish(JOYCON_CONTROL_TOPIC, payload);
+  Serial.printf("[MQTT]  %s -> %s\n", JOYCON_CONTROL_TOPIC, payload);
+
+  lastPublishedState = state;
+  hasPublishedOnce   = true;
 }
 
 // --- GATT-Baum ausgeben -----------------------------------------------------
@@ -696,6 +843,7 @@ static bool subscribeToReport(NimBLERemoteService         *service,
                               ReportTracker               &tracker,
                               const char                  *controllerName,
                               const char                  *reportName,
+                              Switch2ControllerType        controllerType,
                               uint8_t                      firstStickOffset,
                               uint8_t                      secondStickOffset,
                               const Switch2ButtonMapping  *buttonMappings,
@@ -715,6 +863,7 @@ static bool subscribeToReport(NimBLERemoteService         *service,
 
   tracker.controllerName     = controllerName;
   tracker.reportName         = reportName;
+  tracker.controllerType     = controllerType;
   tracker.firstStickOffset   = firstStickOffset;
   tracker.secondStickOffset  = secondStickOffset;
   tracker.buttonMappings     = buttonMappings;
@@ -891,6 +1040,7 @@ static void connectToController(const NimBLEAddress &address)
                       session->specificReportTracker,
                       matchedReport->controllerName,
                       matchedReport->reportName,
+                      matchedReport->type,
                       matchedReport->firstStickOffset,
                       matchedReport->secondStickOffset,
                       matchedReport->buttonMappings,
@@ -908,6 +1058,7 @@ static void connectToController(const NimBLEAddress &address)
                     session->commonReportTracker,
                     matchedReport != nullptr ? matchedReport->controllerName : "Unbekannt",
                     "Report 0x05",
+                    Switch2ControllerType::Unknown,
                     COMMON_REPORT_LEFT_STICK_OFFSET,
                     COMMON_REPORT_RIGHT_STICK_OFFSET,
                     nullptr,  // Report 0x05 hat ein eigenes Button-Layout, nicht gemessen
@@ -1112,6 +1263,10 @@ void setup()
   Serial.println("=== Switch-2-Controller Rohsignal-Scanner ===");
   printHelp();
 
+  Serial.printf("[MQTT]  Broker %s:%d, Topic %s\n",
+                CLAW_MQTT_BROKER_HOST, CLAW_MQTT_BROKER_PORT, JOYCON_CONTROL_TOPIC);
+  mqttConnection.begin();
+
   NimBLEDevice::init("");
   // Kein Bonding, kein MITM, kein Secure Connections. Der Controller trennt
   // die Verbindung, sobald der Host SMP-Pairing initiiert.
@@ -1131,6 +1286,8 @@ void setup()
 void loop()
 {
   handleSerialCommands();
+  mqttConnection.maintainConnection();
+  publishPendingControlState();
 
   if (hasPendingConnectAddress)
   {
