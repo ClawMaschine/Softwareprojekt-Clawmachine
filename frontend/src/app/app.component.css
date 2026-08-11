@@ -327,8 +327,20 @@
 
 .logs-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 24px;
+}
+
+.log-panel-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.log-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
 }
 
 @media (max-width: 700px) {
@@ -379,16 +391,8 @@
   padding: 1px 5px;
   border-radius: 3px;
   flex-shrink: 0;
-}
-
-.log-source.joycon {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
-}
-
-.log-source.panel {
-  background: color-mix(in srgb, var(--warn) 15%, transparent);
-  color: var(--warn);
 }
 
 .log-payload {

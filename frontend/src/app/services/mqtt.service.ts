@@ -19,19 +19,12 @@ export interface MessageLog {
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
+const CLAWMACHINE_TOPIC_PREFIX = 'clawmachine/';
+
 // Haupt-Steuertopic des Servers — Befehle mit X:/Y:/Z:/claw:-Präfix werden
 // dort unverändert an den Motor-Controller weitergeleitet (siehe
 // MOTOR_COMMAND_PREFIXES in python_server/clawmachine/claw_machine.py).
 const CONTROL_TOPIC = 'clawmachine/web_interface/command';
-
-// Nur für die Anzeige — welche Geräte tatsächlich existieren, weiß allein
-// der Server (DeviceRegistry). Fehlt ein Name hier, wird einfach der rohe
-// Gerätename als Label angezeigt.
-const DEVICE_LABELS: Record<string, string> = {
-  motor_controller: 'Motor Controller',
-  web_interface:    'Web Interface',
-  player_input:     'Player Input',
-};
 
 // Geräteliste: das Webinterface fragt aktiv beim Server nach (statt der
 // Server sie ungefragt zu pushen) und bekommt den aktuellen Stand der
@@ -43,15 +36,28 @@ const DEVICE_LIST_REFRESH_INTERVAL_MS = 5000;
 
 // Wie bei den ESP-Boards: eigenes Status-Topic mit Last-Will (siehe
 // ClawMqttConnection::ensureMqttConnected in claw_mqtt_connection.cpp) —
-// das Webinterface soll sich genau wie player_input als eigenes Gerät
+// das Webinterface soll sich genau wie jedes andere Gerät als eigenes Gerät
 // mit Online/Offline-Status im Dashboard zeigen, nicht nur Befehle senden.
 const STATUS_TOPIC = 'clawmachine/claw_web_interface/status';
+
+const MAX_LOG_ENTRIES_PER_DEVICE = 30;
 
 interface DeviceListEntry {
   name: string;
   isOnline: boolean;
   uptimeMilliseconds: number | null;
   addedAtUnixSeconds: number | null;
+}
+
+// Rein kosmetisch, kennt keine konkreten Gerätenamen: "player_input" wird zu
+// "Player Input". Kein Gerät wird hier fest verdrahtet — welche es gibt,
+// kommt ausschließlich über die Antwort auf DEVICE_LIST_REQUEST_TOPIC rein.
+function formatDeviceLabel(name: string): string {
+  return name
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 @Injectable({ providedIn: 'root' })
@@ -64,8 +70,10 @@ export class MqttService implements OnDestroy {
   // Raten, sondern ausschließlich über die Antwort auf DEVICE_LIST_REQUEST_TOPIC.
   readonly devices$ = new BehaviorSubject<DeviceState[]>([]);
 
-  readonly commandLog$ = new BehaviorSubject<MessageLog[]>([]);
-  readonly inputLog$   = new BehaviorSubject<MessageLog[]>([]);
+  // Ein Nachrichten-Log pro Gerät, keyed nach Device-ID — läuft dynamisch für
+  // jedes Gerät mit, das der Server gerade kennt (siehe devices$), statt fest
+  // verdrahteter Logs für einzelne Gerätenamen.
+  readonly deviceLogs$ = new BehaviorSubject<Record<string, MessageLog[]>>({});
 
   private deviceListRefreshSubscription: Subscription | null = null;
 
@@ -92,12 +100,11 @@ export class MqttService implements OnDestroy {
     this.client.on('connect', () => {
       this.ngZone.run(() => this.connectionStatus$.next('connected'));
       this.client!.publish(STATUS_TOPIC, 'online', { retain: true });
-      this.client!.subscribe('clawmachine/+/status');
-      this.client!.subscribe('clawmachine/+/metadata/uptime');
-      this.client!.subscribe('clawmachine/claw_motor_controller/command');
-      this.client!.subscribe('clawmachine/claw_web_interface/command');
-      this.client!.subscribe('clawmachine/claw_player_input/+');
-      this.client!.subscribe(DEVICE_LIST_TOPIC);
+      // Ein einziges Wildcard-Subscribe für den gesamten Namensraum statt
+      // einzelner Subscribes pro bekanntem Gerätenamen — welche Geräte
+      // tatsächlich existieren, wird rein aus den eingehenden Topics und der
+      // Antwort auf DEVICE_LIST_REQUEST_TOPIC abgeleitet, nicht vorab fest verdrahtet.
+      this.client!.subscribe(`${CLAWMACHINE_TOPIC_PREFIX}#`);
 
       this.requestDeviceList();
       this.deviceListRefreshSubscription?.unsubscribe();
@@ -157,28 +164,31 @@ export class MqttService implements OnDestroy {
       return;
     }
 
-    const parts = topic.split('/');
+    if (!topic.startsWith(CLAWMACHINE_TOPIC_PREFIX)) {
+      return;
+    }
+    const [deviceName, ...subTopicParts] = topic.slice(CLAWMACHINE_TOPIC_PREFIX.length).split('/');
+    const subTopic = subTopicParts.join('/');
+    if (!deviceName || !subTopic) {
+      return;
+    }
 
-    if (parts.length === 3 && parts[2] === 'status') {
-      this.updateDevice(parts[1], {
-        isOnline: payload === 'online',
-        lastSeen: new Date(),
-      });
-    } else if (parts.length === 4 && parts[2] === 'metadata' && parts[3] === 'uptime') {
+    if (subTopic === 'status') {
+      this.updateDevice(deviceName, { isOnline: payload === 'online', lastSeen: new Date() });
+      return;
+    }
+    if (subTopic === 'metadata/uptime') {
       const ms = parseInt(payload, 10);
       if (!isNaN(ms)) {
-        this.updateDevice(parts[1], { uptimeMs: ms, lastSeen: new Date() });
+        this.updateDevice(deviceName, { uptimeMs: ms, lastSeen: new Date() });
       }
-    } else if (topic === 'clawmachine/claw_motor_controller/command') {
-      this.appendLog(this.commandLog$, topic, payload);
-    } else if (topic === 'clawmachine/claw_web_interface/command') {
-      this.appendLog(this.commandLog$, topic, payload);
-    } else if (
-      topic === 'clawmachine/claw_player_input/joycon' ||
-      topic === 'clawmachine/claw_player_input/panel'
-    ) {
-      this.appendLog(this.inputLog$, topic, payload);
+      return;
     }
+
+    // Alles andere (Befehle, Player-Input, Internal-Nachrichten, …) landet im
+    // Aktivitäts-Log des jeweiligen Geräts — dynamisch für jeden Gerätenamen,
+    // den der Server gerade kennt (siehe appendDeviceLog).
+    this.appendDeviceLog(deviceName, topic, payload);
   }
 
   // Antwort auf eine requestDeviceList()-Anfrage — ersetzt die Geräteliste
@@ -199,7 +209,7 @@ export class MqttService implements OnDestroy {
       const existing = current.find(d => d.id === entry.name);
       return {
         id: entry.name,
-        label: DEVICE_LABELS[entry.name] ?? entry.name,
+        label: formatDeviceLabel(entry.name),
         isOnline: entry.isOnline,
         uptimeMs: entry.uptimeMilliseconds,
         lastSeen:
@@ -208,6 +218,17 @@ export class MqttService implements OnDestroy {
       };
     });
     this.devices$.next(next);
+
+    // Logs verwaister Geräte (nicht mehr in der aktuellen Liste) aufräumen,
+    // damit deviceLogs$ nicht unbegrenzt wächst.
+    const knownIds = new Set(next.map(d => d.id));
+    const currentLogs = this.deviceLogs$.value;
+    const prunedLogs = Object.fromEntries(
+      Object.entries(currentLogs).filter(([id]) => knownIds.has(id)),
+    );
+    if (Object.keys(prunedLogs).length !== Object.keys(currentLogs).length) {
+      this.deviceLogs$.next(prunedLogs);
+    }
   }
 
   // Aktualisiert nur bereits bekannte Geräte (Live-Update zwischen zwei
@@ -227,13 +248,22 @@ export class MqttService implements OnDestroy {
     this.devices$.next(updated);
   }
 
-  private appendLog(
-    log$: BehaviorSubject<MessageLog[]>,
-    topic: string,
-    payload: string,
-  ): void {
+  // Nur für Geräte, die der Server bereits kennt (siehe devices$) — sonst
+  // würde jede Nachricht auf clawmachine/# (auch von unbekannten/fremden
+  // Topics) unbegrenzt eigene Log-Buckets anlegen.
+  private appendDeviceLog(deviceName: string, topic: string, payload: string): void {
+    const isKnownDevice = this.devices$.value.some(d => d.id === deviceName);
+    if (!isKnownDevice) {
+      return;
+    }
+
+    const current = this.deviceLogs$.value;
+    const existingLog = current[deviceName] ?? [];
     const entry: MessageLog = { topic, payload, timestamp: new Date() };
-    log$.next([entry, ...log$.value].slice(0, 30));
+    this.deviceLogs$.next({
+      ...current,
+      [deviceName]: [entry, ...existingLog].slice(0, MAX_LOG_ENTRIES_PER_DEVICE),
+    });
   }
 
   ngOnDestroy(): void {
