@@ -134,44 +134,34 @@
     </div>
   </section>
 
-  <!-- Logs -->
-  <div class="logs-grid">
-    <!-- Motor Commands -->
-    <section class="section">
-      <h2 class="section-title">Motor-Befehle <span class="topic-badge">motor_controller/command</span></h2>
-      <div class="log-panel">
-        @if (commandLog.length === 0) {
-          <p class="log-empty">Keine Befehle empfangen</p>
-        } @else {
-          @for (entry of commandLog; track entry.timestamp.getTime()) {
-            <div class="log-row">
-              <span class="log-time">{{ timeLabel(entry.timestamp) }}</span>
-              <span class="log-payload">{{ entry.payload }}</span>
+  <!-- Logs: ein Panel pro Gerät, das der Server gerade kennt (devices) —
+       kein festes Set an Log-Kategorien, sondern dynamisch je Gerät. -->
+  <section class="section">
+    <h2 class="section-title">Geräte-Aktivität</h2>
+    @if (devices.length === 0) {
+      <p class="log-empty">Noch keine Geräte bekannt</p>
+    } @else {
+      <div class="logs-grid">
+        @for (device of devices; track device.id) {
+          <div class="log-panel-block">
+            <h3 class="log-panel-title">{{ device.label }}</h3>
+            <div class="log-panel">
+              @if (!deviceLogs[device.id] || deviceLogs[device.id].length === 0) {
+                <p class="log-empty">Keine Nachrichten empfangen</p>
+              } @else {
+                @for (entry of deviceLogs[device.id]; track entry.timestamp.getTime()) {
+                  <div class="log-row">
+                    <span class="log-time">{{ timeLabel(entry.timestamp) }}</span>
+                    <span class="log-source">{{ logSubTopic(entry.topic, device.id) }}</span>
+                    <span class="log-payload">{{ entry.payload }}</span>
+                  </div>
+                }
+              }
             </div>
-          }
+          </div>
         }
       </div>
-    </section>
-
-    <!-- Player Input -->
-    <section class="section">
-      <h2 class="section-title">Player Input <span class="topic-badge">player_input/joycon | panel</span></h2>
-      <div class="log-panel">
-        @if (inputLog.length === 0) {
-          <p class="log-empty">Kein Input empfangen</p>
-        } @else {
-          @for (entry of inputLog; track entry.timestamp.getTime()) {
-            <div class="log-row">
-              <span class="log-time">{{ timeLabel(entry.timestamp) }}</span>
-              <span class="log-source" [class.joycon]="entry.topic.includes('joycon')" [class.panel]="entry.topic.includes('panel')">
-                {{ entry.topic.includes('joycon') ? 'JC' : 'PNL' }}
-              </span>
-              <span class="log-payload">{{ entry.payload }}</span>
-            </div>
-          }
-        }
-      </div>
-    </section>
-  </div>
+    }
+  </section>
 
 </div>

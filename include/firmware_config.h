@@ -92,16 +92,16 @@
 #define CLAW_PANEL_PIN_DOWN    16
 #endif
 #ifndef CLAW_PANEL_PIN_LEFT
-#define CLAW_PANEL_PIN_LEFT    3
+#define CLAW_PANEL_PIN_LEFT    21
 #endif
 #ifndef CLAW_PANEL_PIN_RIGHT
-#define CLAW_PANEL_PIN_RIGHT   21
+#define CLAW_PANEL_PIN_RIGHT   3
 #endif
 #ifndef CLAW_PANEL_PIN_FRONT
-#define CLAW_PANEL_PIN_FRONT   22
+#define CLAW_PANEL_PIN_FRONT   1
 #endif
 #ifndef CLAW_PANEL_PIN_BACK
-#define CLAW_PANEL_PIN_BACK    1
+#define CLAW_PANEL_PIN_BACK    22
 #endif
 // Greifen/Loslassen kommt vom Potentiometer an SVP, nicht von Tastern.
 // Muss ein ADC1-Pin sein (32, 33, 34, 35, 36, 39) — ADC2-Pins liefern

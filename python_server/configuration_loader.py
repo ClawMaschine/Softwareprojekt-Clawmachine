@@ -7,10 +7,8 @@ from pathlib import Path
 class MqttConfiguration:
     broker: str
     port: int
-    topic: str
     username: str
     password: str
-    device_added_topic: str
     client_id: str
     connect_timeout_seconds: float
 
@@ -23,10 +21,6 @@ def load_mqtt_configuration() -> MqttConfiguration:
 
     broker = config_parser.get("mqtt", "broker", fallback="localhost")
     port = config_parser.getint("mqtt", "port", fallback=1883)
-    topic = config_parser.get("mqtt", "topic", fallback="clawmachine/claw")
-    device_added_topic = config_parser.get(
-        "mqtt", "device_added_topic", fallback="clawmachine/device/added"
-    )
     client_id = config_parser.get("mqtt", "client_id", fallback="server")
     connect_timeout_seconds = config_parser.getfloat(
         "mqtt", "connect_timeout_seconds", fallback=5.0
@@ -37,8 +31,6 @@ def load_mqtt_configuration() -> MqttConfiguration:
     return MqttConfiguration(
         broker=broker,
         port=port,
-        topic=topic,
-        device_added_topic=device_added_topic,
         username=username,
         password=password,
         client_id=client_id,

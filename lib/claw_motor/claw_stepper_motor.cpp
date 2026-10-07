@@ -77,8 +77,18 @@ void ClawStepperMotor::update()
   updateRamp();
 
   if (stepIntervalMicroseconds == 0) {
+    // Motor steht still (Rampe ist bei 0% angekommen) -> Spulen stromlos
+    // schalten, damit der Motor im Leerlauf nicht unnötig Strom zieht und
+    // sich nicht erwärmt. Nur einmal beim Übergang in den Stillstand
+    // aufrufen, nicht bei jedem update()-Durchlauf.
+    if (!isStepperReleased) {
+      stepperMotor->release();
+      isStepperReleased = true;
+    }
     return;
   }
+
+  isStepperReleased = false;
 
   unsigned long nowMicroseconds = micros();
   if (nowMicroseconds - lastStepMicroseconds < stepIntervalMicroseconds) {

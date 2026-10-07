@@ -6,18 +6,14 @@ try:
 except ModuleNotFoundError:
     from esp_device import EspDevice
 
-DEVICE_ADDED_TOPIC_PREFIX = "clawmachine/device/"
-DEVICE_ADDED_TOPIC_SUFFIX = "/added"
+
 
 
 class DeviceRegistry:
-    def __init__(self, known_esp_names: list, device_added_topic: str):
-        self.device_added_topic = device_added_topic
-        self.devices_by_name: dict[str, EspDevice] = {
-            name: EspDevice(name=name) for name in known_esp_names
-        }
+    def __init__(self):
+        self.devices_by_name: dict[str, EspDevice] = {}
 
-    def register(self, device_name: str) -> Optional[EspDevice]:
+    def add(self, device_name: str) -> Optional[EspDevice]:
         cleaned = device_name.strip()
         if not cleaned:
             return None
@@ -36,14 +32,3 @@ class DeviceRegistry:
 
     def get(self, name: str) -> Optional[EspDevice]:
         return self.devices_by_name.get(name)
-    
-    
-
-    def extract_device_name(self, topic: str, payload_text: str) -> Optional[str]:
-        if topic == self.device_added_topic:
-            return payload_text
-
-        if topic.startswith(DEVICE_ADDED_TOPIC_PREFIX) and topic.endswith(DEVICE_ADDED_TOPIC_SUFFIX):
-            return topic[len(DEVICE_ADDED_TOPIC_PREFIX):-len(DEVICE_ADDED_TOPIC_SUFFIX)]
-
-        return None

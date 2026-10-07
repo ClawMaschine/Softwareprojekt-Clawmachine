@@ -17,13 +17,11 @@ public:
   // bedeutet: von 0% auf 100% in 0.5s). 0 (Standard) = keine Rampe, die
   // Geschwindigkeit springt wie bisher sofort auf den Zielwert.
   void setAcceleration(float percentPerSecond);
-
   void update();
 
 private:
   void applySpeed(float speedPercent);
   void updateRamp();
-
   Adafruit_MotorShield &motorShield;
   uint8_t stepperPort;
   uint16_t maxRevolutionsPerMinute;
@@ -42,4 +40,8 @@ private:
   unsigned long stepIntervalMicroseconds = 0;
   unsigned long lastStepMicroseconds     = 0;
   unsigned long lastRampMicroseconds     = 0;
+
+  // Verhindert, dass release() bei jedem update()-Aufruf erneut per I2C
+  // gesendet wird, solange der Motor bereits stromlos ist.
+  bool isStepperReleased = false;
 };

@@ -66,10 +66,15 @@ Ein steuerbarer **Greifautomat (Claw Machine)** als Softwarepraktikum-Projekt. S
 |------------------------------|-----------------------|----------------------------------------------|
 | `clawmachine/joycon`         | ESP32 → Broker        | Spieler-Steuerbefehle (`open`, `close`)      |
 | `clawmachine/claw`           | Server → Broker       | Haupttopic des Servers                       |
-| `clawmachine/device/added`   | ESP32 → Broker        | Registrierung neuer ESP32-Geräte             |
+| `clawmachine/<name>/registered` | Server → Broker    | Bestätigung an ein Gerät, das der Server gerade neu registriert hat |
 | `claw/uptime_milliseconds`   | ESP32 → Broker        | Heartbeat/Uptime der ESP32-Boards            |
 | `claw/uptime_seconds`        | ESP32 → Broker        | Heartbeat/Uptime der ESP32-Boards            |
 | `claw/uptime_minutes`        | ESP32 → Broker        | Heartbeat/Uptime der ESP32-Boards            |
+
+Es gibt kein eigenes Anmelde-Topic mehr: Der Server erkennt neue Geräte automatisch, sobald
+sie zum ersten Mal auf einem ihrer Topics senden (z.B. `clawmachine/<name>/metadata/uptime`
+oder `clawmachine/<name>/status`), registriert sie in der `DeviceRegistry` und bestätigt das
+einmalig über `clawmachine/<name>/registered`.
 
 ---
 

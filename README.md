@@ -169,8 +169,6 @@ username = clawmachine       # MQTT-Benutzername
 password = claw_secret       # MQTT-Passwort
 
 # Nur Python-Server
-topic = clawmachine/claw
-device_added_topic = clawmachine/device/added
 client_id = server
 connect_timeout_seconds = 5
 

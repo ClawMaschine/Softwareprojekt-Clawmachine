@@ -5,18 +5,19 @@ from typing import Optional
 
 try:
     from python_server.configuration_loader import load_mqtt_configuration
-    from python_server.esp.mqtt_esp_controller import MQTTEspController
     from python_server.mqtt import MQTTClient
     from python_server.clawmachine.device_registry import DeviceRegistry
+    from python_server.clawmachine.esp_device import EspDevice
 except ModuleNotFoundError:
     from configuration_loader import load_mqtt_configuration
-    from esp.mqtt_esp_controller import MQTTEspController
     from mqtt import MQTTClient
     from device_registry import DeviceRegistry
+    from esp_device import EspDevice
 
-KNOWN_ESP_NAMES = ["motor_controller", "control_panel", "web_interface"]
 
 CLAWMACHINE_TOPIC_PREFIX = "clawmachine/"
+
+CONTROL_TOPIC = "clawmachine/claw"
 
 METADATA_UPTIME_TOPIC_WILDCARD = "clawmachine/+/metadata/uptime"
 METADATA_UPTIME_TOPIC_SUFFIX = "/metadata/uptime"
@@ -27,6 +28,17 @@ INTERNAL_TOPIC_SUFFIX = "/internal"
 DEVICE_STATUS_TOPIC_WILDCARD = "clawmachine/+/status"
 DEVICE_STATUS_TOPIC_SUFFIX = "/status"
 
+# Kein eigenes "device/added"-Anmelde-Topic mehr — der Server registriert ein
+# Gerät automatisch, sobald es zum ersten Mal auf einem seiner Topics (z.B.
+# Uptime-Heartbeat, Status) auftaucht, und bestätigt das hierüber.
+DEVICE_REGISTERED_TOPIC_SUFFIX = "/registered"
+
+# Geräteliste fürs Webinterface: Anfrage/Antwort statt Server-seitigem Push —
+# das Webinterface fragt aktiv nach (leerer Payload reicht), der Server
+# antwortet mit dem aktuellen Stand der DeviceRegistry als JSON-Array.
+DEVICE_LIST_REQUEST_TOPIC = "clawmachine/web_interface/devices/request"
+DEVICE_LIST_TOPIC = "clawmachine/web_interface/devices"
+
 MOTOR_CONTROLLER_COMMAND_TOPIC = "clawmachine/motor_controller/motor/command"
 # JSON-Settings-Update für den Motor-Controller (z.B. Beschleunigung) —
 # separates Topic von den X:/Y:/Z:/claw:-Bewegungsbefehlen, siehe
@@ -36,7 +48,7 @@ MOTOR_COMMAND_PREFIXES = ("X:", "Y:", "Z:", "claw:")
 
 PLAYER_INPUT_PANEL_TOPIC = "clawmachine/player_input/panel"
 WEBINTERFACE_COMMAND_TOPIC = "clawmachine/web_interface/command"
-PANEL_MOTOR_SPEED = 80
+PANEL_MOTOR_SPEED = 130
 
 
 def extract_esp_name_from_topic(topic: str, suffix: str) -> Optional[str]:
@@ -51,21 +63,18 @@ class ClawMachine:
     def __init__(self):
 
         mqtt_configuration = load_mqtt_configuration()
-        self.control_topic = mqtt_configuration.topic
-        self.device_registry = DeviceRegistry(
-            known_esp_names=KNOWN_ESP_NAMES,
-            device_added_topic=mqtt_configuration.device_added_topic,
-        )
+        self.control_topic = CONTROL_TOPIC
+        self.device_registry = DeviceRegistry()
         self.mqtt_client = MQTTClient(
             client_id=mqtt_configuration.client_id,
-            broker="mqtt-broker",
+            broker=mqtt_configuration.broker,
             port=mqtt_configuration.port,
             connect_timeout_seconds=mqtt_configuration.connect_timeout_seconds,
             username=mqtt_configuration.username,
             password=mqtt_configuration.password,
         )
         self.mqtt_client.connect()
-        self.esp_controller = MQTTEspController(self.mqtt_client)
+
 
         # Der Player-Input-Controller schickt beim Panel nur noch die Tasten,
         # die sich seit der letzten Nachricht geändert haben (Delta statt
@@ -75,7 +84,6 @@ class ClawMachine:
         self.panel_button_state = {}
 
         self.setup_message_handlers()
-        self.mqtt_client.publish(self.control_topic, "open")
 
         self.main_loop_started_at = time.time()
         self.main_loop()
@@ -85,13 +93,34 @@ class ClawMachine:
         if mqtt_network_client is None:
             raise RuntimeError("MQTT client is not connected. Call connect() first.")
         mqtt_network_client.subscribe(self.control_topic)
-        mqtt_network_client.subscribe(self.device_registry.device_added_topic)
         mqtt_network_client.subscribe(METADATA_UPTIME_TOPIC_WILDCARD)
         mqtt_network_client.subscribe(INTERNAL_TOPIC_WILDCARD)
         mqtt_network_client.subscribe(DEVICE_STATUS_TOPIC_WILDCARD)
         mqtt_network_client.subscribe(PLAYER_INPUT_PANEL_TOPIC)
         mqtt_network_client.subscribe(WEBINTERFACE_COMMAND_TOPIC)
+        mqtt_network_client.subscribe(DEVICE_LIST_REQUEST_TOPIC)
         mqtt_network_client.on_message = self.on_message
+
+    def ensure_device_registered(self, esp_name: str) -> Optional[EspDevice]:
+        # Kein separates "device/added"-Topic mehr: taucht ein Gerätename hier
+        # zum ersten Mal auf, wird er automatisch registriert und das Gerät
+        # bekommt eine einmalige Bestätigung zurück. Ist es schon bekannt,
+        # passiert nichts weiter — kein erneutes Registrieren/Bestätigen bei
+        # jedem Heartbeat.
+        device = self.device_registry.get(esp_name)
+        if device is None:
+            device = self.device_registry.add(esp_name)
+            registered_topic = (
+                f"{CLAWMACHINE_TOPIC_PREFIX}{esp_name}{DEVICE_REGISTERED_TOPIC_SUFFIX}"
+            )
+            self.mqtt_client.publish(registered_topic, "ok")
+        return device
+
+    def publish_device_list(self):
+        # Antwort auf DEVICE_LIST_REQUEST_TOPIC — wird nur auf Anfrage
+        # geschickt, nicht automatisch bei jeder Änderung der Registry.
+        devices = [device.to_dict() for device in self.device_registry.devices_by_name.values()]
+        self.mqtt_client.publish(DEVICE_LIST_TOPIC, json.dumps(devices))
 
     def on_message(self, _client, _userdata, message):
         # Callback von paho-mqtt für JEDE Nachricht auf einem abonnierten Topic
@@ -112,6 +141,10 @@ class ClawMachine:
         match topic:
             case _ if topic in (PLAYER_INPUT_PANEL_TOPIC, WEBINTERFACE_COMMAND_TOPIC):
                 self.on_control_command(topic, payload_text)
+
+            # Webinterface fragt aktiv nach der aktuellen Geräteliste
+            case _ if topic == DEVICE_LIST_REQUEST_TOPIC:
+                self.publish_device_list()
             # 7) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
             #    Haupt-Steuertopic — unverändert an den Motor-Controller weiterleiten
             case _ if topic == self.control_topic and payload_text.startswith(
@@ -119,37 +152,22 @@ class ClawMachine:
             ):
                 self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
 
-            # 1) Neues/erneut verbundenes ESP32-Gerät meldet sich (clawmachine/device/added)
-            case _ if (
-                added_device_name := self.device_registry.extract_device_name(
-                    topic, payload_text
-                )
-            ) is not None:
-                self.device_registry.register(added_device_name)
-
-            # 2) Heartbeat/Laufzeit eines Geräts (clawmachine/<name>/metadata/uptime)
+            # 1) Heartbeat/Laufzeit eines Geräts (clawmachine/<name>/metadata/uptime) —
+            #    taucht ein Gerätename hier zum ersten Mal auf, wird er automatisch
+            #    registriert (siehe ensure_device_registered)
             case _ if (
                 esp_name := extract_esp_name_from_topic(topic, METADATA_UPTIME_TOPIC_SUFFIX)
             ) is not None:
-                device = self.device_registry.get(esp_name)
+                device = self.ensure_device_registered(esp_name)
                 if device is not None:
                     device.metadata.uptime_milliseconds = int(payload_text)
 
-            # 3) Geräte-interne Nachricht, wird an das jeweilige EspDevice weitergereicht
-            #    (clawmachine/<name>/internal)
-            case _ if (
-                esp_name := extract_esp_name_from_topic(topic, INTERNAL_TOPIC_SUFFIX)
-            ) is not None:
-                device = self.device_registry.get(esp_name)
-                if device is not None:
-                    device.on_message(topic, payload_text)
-
-            # 4) Online/Offline-Status eines Geräts, meist über LWT (Last Will) gesetzt
-            #    (clawmachine/<name>/status)
+            # 2) Online/Offline-Status eines Geräts, meist über LWT (Last Will) gesetzt
+            #    (clawmachine/<name>/status) — registriert das Gerät ebenso automatisch
             case _ if (
                 esp_name := extract_esp_name_from_topic(topic, DEVICE_STATUS_TOPIC_SUFFIX)
             ) is not None:
-                device = self.device_registry.get(esp_name)
+                device = self.ensure_device_registered(esp_name)
                 if device is not None:
                     device.is_online = payload_text == "online"
                     
@@ -226,14 +244,4 @@ class ClawMachine:
         while True:
             time.sleep(1)
 
-    def move_to(self, x, y):
-        self.position = (x, y)
-        print(f"Moved to position: {self.position}")
 
-    def open_claw(self):
-        self.is_claw_open = True
-        print("Claw opened")
-
-    def close_claw(self):
-        self.is_claw_open = False
-        print("Claw closed")

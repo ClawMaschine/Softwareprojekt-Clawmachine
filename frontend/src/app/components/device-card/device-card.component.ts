@@ -27,15 +27,6 @@ export class DeviceCardComponent {
     return `${seconds}s`;
   }
 
-  get deviceIcon(): string {
-    switch (this.device.id) {
-      case 'motor_controller': return '⚙';
-      case 'control_panel':    return '🖥';
-      case 'player_input':     return '🎮';
-      default:                 return '📡';
-    }
-  }
-
   get lastSeenFormatted(): string {
     const d = this.device.lastSeen;
     if (!d) return '—';
