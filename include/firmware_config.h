@@ -105,19 +105,19 @@
 #endif
 
 #ifndef CLAW_ENDSTOP_X_1
-#define CLAW_ENDSTOP_X_1 1
-#endif
-#ifndef CLAW_ENDSTOP_X_2
-#define CLAW_ENDSTOP_X_2 3
-#endif
-#ifndef CLAW_ENDSTOP_Y_1
-#define CLAW_ENDSTOP_Y_1 22
+#define CLAW_ENDSTOP_X_1 17
 #endif
 #ifndef CLAW_ENDSTOP_X_2
 #define CLAW_ENDSTOP_X_2 21
 #endif
 #ifndef CLAW_ENDSTOP_Y_1
-#define CLAW_ENDSTOP_Y_1 17
+#define CLAW_ENDSTOP_Y_1 22
+#endif
+#ifndef CLAW_ENDSTOP_Y_2
+#define CLAW_ENDSTOP_Y_2 3
+#endif
+#ifndef CLAW_ENDSTOP_Z_1
+#define CLAW_ENDSTOP_Z_1 1
 #endif
 
 
