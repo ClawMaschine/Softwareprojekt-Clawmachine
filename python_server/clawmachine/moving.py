@@ -1,8 +1,3 @@
-from turtle import position
-from mqtt import MQTTClient
-
-
-
 class Moving:
     endstop_status = {
         "X": 1,  # 1 = nicht erreicht, 0 = erreicht
@@ -12,10 +7,9 @@ class Moving:
         "X": 0,  # Aktuelle Position der Achse (z.B. in Millimetern oder Schritten)
         "Y": 0,
     }
-    
+
     def __init__(self, mqtt_client):
-        this.mqtt_client = mqtt_client
-        this.mqtt_client.subscribe("clawmachine/motor_controller/")
+        self.mqtt_client = mqtt_client
 
     
     def __endstop_reached(self, axis):

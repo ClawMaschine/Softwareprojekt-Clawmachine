@@ -9,6 +9,7 @@ try:
     from python_server.mqtt import MQTTClient
     from python_server.clawmachine.device_registry import DeviceRegistry
     from python_server.clawmachine.esp_device import EspDevice
+    from python_server.clawmachine.moving import Moving
 except ModuleNotFoundError:
     from configuration_loader import load_mqtt_configuration
     from mqtt import MQTTClient
