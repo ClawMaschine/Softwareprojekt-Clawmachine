@@ -14,7 +14,9 @@
 #include "firmware_config.h"
 #include "switch2_pairing.h"
 #include "switch2_controller_types.h"
+#include "switch2_hex_output.h"
 #include "switch2_report_parser.h"
+#include "switch2_report_tracker.h"
 #include "switch2_protocol.h"
 
 // ============================================================================
@@ -127,7 +129,7 @@ static void clearControlState(Switch2ControllerType type)
   hasPendingControlState = true;
 }
 
-// --- Laufzeitschalter -------------------------------------------------------
+// --- Rueckfallebene: gemeinsamer Report 0x05 --------------------------------
 
 // Zusaetzlich zum controllerspezifischen Report auch den gemeinsamen Report
 // 0x05 abonnieren. War im Bring-up die Rueckfallebene fuer den Fall, dass der
@@ -135,90 +137,6 @@ static void clearControlState(Switch2ControllerType type)
 // liefern auf Handle 0x000E zuverlaessig. Bleibt als Schalter stehen, ist aber
 // aus, weil das Abo nur den Datenverkehr und die Konsolenausgabe verdoppelt.
 #define SUBSCRIBE_TO_COMMON_INPUT_REPORT 0
-
-static bool shouldPrintFullHexDump  = false;
-static bool shouldPrintStickValues  = true;
-// true = Klartextnamen, false = rohe Bytes und Bitmasken (zum Nachmessen)
-static bool shouldPrintButtonNames  = true;
-
-// --- Report-Verfolgung ------------------------------------------------------
-//
-// Pro abonnierter Characteristic wird der letzte Report aufgehoben und mit dem
-// naechsten verglichen. Bytes, die sich im Ruhezustand staendig aendern
-// (Zaehler, Motion-Daten, Stick-Jitter), werden in einer Lernphase automatisch
-// als Rauschen markiert und danach aus der Diff-Ausgabe ausgeblendet - sonst
-// waere die Konsole unbrauchbar. Der Vollhexdump ('d') zeigt trotzdem alles.
-
-static constexpr uint16_t NOISE_LEARNING_SAMPLE_COUNT  = 100;
-static constexpr uint8_t  NOISE_CHANGE_PERCENT_THRESHOLD = 25;
-
-// Drosselung der [STICK]-Ausgabe: erst ab dieser Aenderung in Prozent wird
-// eine neue Zeile erzeugt.
-static constexpr int8_t STICK_PRINT_STEP_PERCENT = 5;
-
-struct ReportTracker
-{
-  const char *controllerName;
-  const char *reportName;
-  Switch2ControllerType controllerType;
-  uint8_t firstStickOffset;
-  uint8_t secondStickOffset;
-
-  const Switch2ButtonMapping *buttonMappings;
-  size_t                      buttonMappingCount;
-
-  uint8_t previousReport[MAXIMUM_REPORT_LENGTH];
-  size_t  previousReportLength;
-  bool    hasPreviousReport;
-
-  uint16_t learningSampleCount;
-  uint16_t byteChangeCount[MAXIMUM_REPORT_LENGTH];
-  bool     isNoisyByte[MAXIMUM_REPORT_LENGTH];
-  bool     isNoiseLearned;
-
-  // Mittellage wird waehrend derselben Lernphase mitgemittelt, in der auch das
-  // Rauschen bestimmt wird. Die Ruhelage liegt geraeteabhaengig deutlich neben
-  // den theoretischen 0x800 (gemessen: 0x860 / 0x788) und darf deshalb nicht
-  // angenommen werden.
-  uint32_t      stickCenterSumX;
-  uint32_t      stickCenterSumY;
-  uint16_t      stickCenterSampleCount;
-  StickPosition stickCenter;
-  bool          hasStickCenter;
-
-  StickDeflection lastPrintedDeflection;
-  bool            hasPrintedDeflection;
-
-  uint32_t receivedReportCount;
-};
-
-static void resetReportTracker(ReportTracker &tracker)
-{
-  tracker.previousReportLength   = 0;
-  tracker.hasPreviousReport      = false;
-  tracker.learningSampleCount    = 0;
-  tracker.isNoiseLearned         = false;
-  tracker.stickCenterSumX        = 0;
-  tracker.stickCenterSumY        = 0;
-  tracker.stickCenterSampleCount = 0;
-  tracker.hasStickCenter         = false;
-  tracker.hasPrintedDeflection   = false;
-  tracker.receivedReportCount    = 0;
-  memset(tracker.byteChangeCount, 0, sizeof(tracker.byteChangeCount));
-  memset(tracker.isNoisyByte, 0, sizeof(tracker.isNoisyByte));
-}
-
-// Der Parser soll den Tracker nicht kennen muessen. Deshalb wird die
-// Kalibrierung des ersten Sticks hier zusammengestellt und als Wert
-// uebergeben - der Parser bleibt damit ohne Abhaengigkeit nach oben.
-static StickCalibration trackerStickCalibration(const ReportTracker &tracker)
-{
-  StickCalibration stick;
-  stick.offset    = tracker.firstStickOffset;
-  stick.center    = tracker.stickCenter;
-  stick.hasCenter = tracker.hasStickCenter;
-  return stick;
-}
 
 // --- Verbindungsverwaltung --------------------------------------------------
 
@@ -674,280 +592,65 @@ static void advancePairingSessions()
   }
 }
 
-// --- Hilfsfunktionen --------------------------------------------------------
+// --- Kernstueck: was ein eintreffender Report nach sich zieht ---------------
+//
+// Diese Funktion verdrahtet nur. Sie ist bewusst die einzige Stelle, an der
+// Diagnose (switch2_report_tracker), Auswertung (switch2_report_parser),
+// Vibration und MQTT-Ausgabe zusammentreffen - die Module selbst kennen sich
+// gegenseitig nicht.
+//
+// Sie laeuft im NimBLE-Host-Task, nicht im Arduino-Task. Deshalb wird hier
+// nichts gesendet: Vibration und MQTT-Zustand werden nur vorgemerkt und im
+// loop() abgearbeitet.
 
-static void printHexBytes(const uint8_t *bytes, size_t length)
+// Testvibration bei steigender Flanke der A-Taste. Bewusst VOR der Lernphase
+// und nicht in der Diff-Auswertung: die laeuft erst nach der Lernphase und
+// wuerde die Rueckmeldung die ersten hundert Reports lang verschlucken.
+//
+// Der gemeinsame Report 0x05 wird mit Typ Unknown abonniert und faellt damit
+// von selbst heraus - sein Tastenlayout ist ein anderes.
+static void requestVibrationOnAButtonPress(const ReportTracker &tracker,
+                                           const uint8_t       *report,
+                                           size_t               usableLength)
 {
-  for (size_t i = 0; i < length; i++)
-  {
-    Serial.printf("%02X", bytes[i]);
-    if ((i % 8) == 7 && i + 1 < length)
-    {
-      Serial.print(' ');
-    }
-  }
-}
-
-// Die drei Bytes eines Sticks gehoeren nicht in die Diff-Ausgabe: sie werden
-// separat als [STICK] dekodiert. Der Rauschfilter allein reicht dafuer nicht,
-// weil das dritte Byte (obere Y-Bits) im Ruhezustand stabil bleibt und sich
-// erst bei Bewegung aendert - es sahe sonst wie ein Tastendruck aus.
-static bool isPartOfKnownStickField(const ReportTracker &tracker, size_t byteIndex)
-{
-  if (tracker.firstStickOffset != NO_STICK_OFFSET &&
-      byteIndex >= tracker.firstStickOffset &&
-      byteIndex < static_cast<size_t>(tracker.firstStickOffset) + STICK_PACKED_BYTE_COUNT)
-  {
-    return true;
-  }
-  if (tracker.secondStickOffset != NO_STICK_OFFSET &&
-      byteIndex >= tracker.secondStickOffset &&
-      byteIndex < static_cast<size_t>(tracker.secondStickOffset) + STICK_PACKED_BYTE_COUNT)
-  {
-    return true;
-  }
-  return false;
-}
-
-static void printLearnedNoiseBytes(const ReportTracker &tracker)
-{
-  Serial.printf("[BASE]  %s / %s: Referenz gesetzt. Ignorierte Rausch-Bytes:",
-                tracker.controllerName, tracker.reportName);
-
-  bool hasAnyNoisyByte = false;
-  for (size_t i = 0; i < tracker.previousReportLength; i++)
-  {
-    if (tracker.isNoisyByte[i])
-    {
-      Serial.printf(" 0x%02X", static_cast<unsigned>(i));
-      hasAnyNoisyByte = true;
-    }
-  }
-  if (!hasAnyNoisyByte)
-  {
-    Serial.print(" keine");
-  }
-  Serial.println();
-  Serial.printf("[BASE]  %s: Stick-Mitte gemessen bei x=0x%03X y=0x%03X\n",
-                tracker.controllerName, tracker.stickCenter.x, tracker.stickCenter.y);
-  Serial.println("[BASE]  Bitte jetzt Tasten einzeln druecken.");
-}
-
-// Stick als Richtung und prozentuale Auslenkung ausgeben. In der Mittellage
-// wird bewusst gar nichts ausgegeben.
-static void printStickDeflection(ReportTracker &tracker, const uint8_t *report, size_t length)
-{
-  if (!shouldPrintStickValues)
+  if (tracker.controllerType != Switch2ControllerType::JoyConRight ||
+      usableLength <= JOYCON_RIGHT_A_BUTTON_BYTE ||
+      tracker.previousReportLength <= JOYCON_RIGHT_A_BUTTON_BYTE)
   {
     return;
   }
 
-  StickDeflection deflection;
-  if (!readStickDeflection(report, length, trackerStickCalibration(tracker), deflection))
+  const bool wasAButtonPressed =
+      (tracker.previousReport[JOYCON_RIGHT_A_BUTTON_BYTE] & JOYCON_RIGHT_A_BUTTON_MASK) != 0;
+  const bool isAButtonPressed =
+      (report[JOYCON_RIGHT_A_BUTTON_BYTE] & JOYCON_RIGHT_A_BUTTON_MASK) != 0;
+
+  if (isAButtonPressed && !wasAButtonPressed)
   {
-    return;  // kein Stick bekannt, noch nicht kalibriert, oder Report zu kurz
+    requestVibration(Switch2ControllerType::JoyConRight);
   }
-
-  const bool isHorizontalIdle = isInsideDeadzone(deflection.horizontalPercent);
-  const bool isVerticalIdle   = isInsideDeadzone(deflection.verticalPercent);
-
-  if (isHorizontalIdle && isVerticalIdle)
-  {
-    // Mittellage: nichts ausgeben. Merker zuruecksetzen, damit die naechste
-    // Auslenkung sofort wieder eine Zeile erzeugt.
-    tracker.hasPrintedDeflection = false;
-    return;
-  }
-
-  // Drosselung: bei ~30 Reports/s wuerde sonst jede Zitterbewegung eine Zeile
-  // erzeugen. Neu ausgegeben wird erst ab einer spuerbaren Aenderung.
-  if (tracker.hasPrintedDeflection)
-  {
-    const int16_t horizontalChange =
-        abs(deflection.horizontalPercent - tracker.lastPrintedDeflection.horizontalPercent);
-    const int16_t verticalChange =
-        abs(deflection.verticalPercent - tracker.lastPrintedDeflection.verticalPercent);
-
-    if (horizontalChange < STICK_PRINT_STEP_PERCENT && verticalChange < STICK_PRINT_STEP_PERCENT)
-    {
-      return;
-    }
-  }
-
-  Serial.printf("[STICK] %s:", tracker.controllerName);
-  if (!isHorizontalIdle)
-  {
-    Serial.printf(" %s %d%%",
-                  deflection.horizontalPercent > 0 ? "rechts" : "links",
-                  abs(deflection.horizontalPercent));
-  }
-  if (!isVerticalIdle)
-  {
-    Serial.printf(" %s %d%%",
-                  deflection.verticalPercent > 0 ? "oben" : "unten",
-                  abs(deflection.verticalPercent));
-  }
-  Serial.println();
-
-  tracker.lastPrintedDeflection = deflection;
-  tracker.hasPrintedDeflection  = true;
 }
-
-// --- Kernstueck: Report vergleichen und Aenderungen ausgeben ----------------
 
 static void handleIncomingReport(ReportTracker &tracker, const uint8_t *report, size_t length)
 {
   const size_t usableLength = length > MAXIMUM_REPORT_LENGTH ? MAXIMUM_REPORT_LENGTH : length;
   tracker.receivedReportCount++;
 
-  if (shouldPrintFullHexDump)
+  printReportHexDump(tracker, report, length, usableLength);
+
+  if (captureFirstReport(tracker, report, length, usableLength))
   {
-    Serial.printf("[RAW]   %s / %s (%u Bytes): ",
-                  tracker.controllerName, tracker.reportName, static_cast<unsigned>(length));
-    printHexBytes(report, usableLength);
-    Serial.println();
+    return;  // kein Vorgaenger vorhanden, also nichts zu vergleichen
   }
 
-  if (!tracker.hasPreviousReport)
+  requestVibrationOnAButtonPress(tracker, report, usableLength);
+
+  if (advanceNoiseLearning(tracker, report, usableLength))
   {
-    memcpy(tracker.previousReport, report, usableLength);
-    tracker.previousReportLength = usableLength;
-    tracker.hasPreviousReport    = true;
-    Serial.printf("[BASE]  %s / %s: erster Report empfangen (%u Bytes), lerne Rauschen...\n",
-                  tracker.controllerName, tracker.reportName, static_cast<unsigned>(length));
-    return;
+    return;  // Lernphase laeuft noch, der Report ist damit verbraucht
   }
 
-  // Testvibration bei steigender Flanke der A-Taste. Bewusst hier oben und
-  // nicht in der Diff-Auswertung: die laeuft erst nach der Lernphase und
-  // wuerde die Rueckmeldung die ersten hundert Reports lang verschlucken.
-  //
-  // Der gemeinsame Report 0x05 wird mit Typ Unknown abonniert und faellt damit
-  // von selbst heraus - sein Tastenlayout ist ein anderes.
-  if (tracker.controllerType == Switch2ControllerType::JoyConRight &&
-      usableLength > JOYCON_RIGHT_A_BUTTON_BYTE &&
-      tracker.previousReportLength > JOYCON_RIGHT_A_BUTTON_BYTE)
-  {
-    const bool wasAButtonPressed =
-        (tracker.previousReport[JOYCON_RIGHT_A_BUTTON_BYTE] & JOYCON_RIGHT_A_BUTTON_MASK) != 0;
-    const bool isAButtonPressed =
-        (report[JOYCON_RIGHT_A_BUTTON_BYTE] & JOYCON_RIGHT_A_BUTTON_MASK) != 0;
-
-    if (isAButtonPressed && !wasAButtonPressed)
-    {
-      requestVibration(Switch2ControllerType::JoyConRight);
-    }
-  }
-
-  // Lernphase: zaehlen, welche Bytes sich im Ruhezustand staendig aendern.
-  if (!tracker.isNoiseLearned)
-  {
-    for (size_t i = 0; i < usableLength && i < tracker.previousReportLength; i++)
-    {
-      if (report[i] != tracker.previousReport[i])
-      {
-        tracker.byteChangeCount[i]++;
-      }
-    }
-
-    // Dieselben Stichproben liefern die Stick-Mittellage. Der Controller liegt
-    // in dieser Phase ruhig, also ist der Mittelwert genau die Ruhelage.
-    if (tracker.firstStickOffset != NO_STICK_OFFSET &&
-        static_cast<size_t>(tracker.firstStickOffset) + STICK_PACKED_BYTE_COUNT <=
-            usableLength)
-    {
-      const StickPosition raw = unpackPackedStickValues(&report[tracker.firstStickOffset]);
-      tracker.stickCenterSumX += raw.x;
-      tracker.stickCenterSumY += raw.y;
-      tracker.stickCenterSampleCount++;
-    }
-
-    tracker.learningSampleCount++;
-    memcpy(tracker.previousReport, report, usableLength);
-    tracker.previousReportLength = usableLength;
-
-    if (tracker.learningSampleCount >= NOISE_LEARNING_SAMPLE_COUNT)
-    {
-      for (size_t i = 0; i < tracker.previousReportLength; i++)
-      {
-        const uint32_t changePercent =
-            (static_cast<uint32_t>(tracker.byteChangeCount[i]) * 100) / tracker.learningSampleCount;
-        tracker.isNoisyByte[i] = changePercent >= NOISE_CHANGE_PERCENT_THRESHOLD;
-      }
-
-      if (tracker.stickCenterSampleCount > 0)
-      {
-        tracker.stickCenter.x =
-            static_cast<uint16_t>(tracker.stickCenterSumX / tracker.stickCenterSampleCount);
-        tracker.stickCenter.y =
-            static_cast<uint16_t>(tracker.stickCenterSumY / tracker.stickCenterSampleCount);
-        tracker.hasStickCenter = true;
-      }
-
-      tracker.isNoiseLearned = true;
-      printLearnedNoiseBytes(tracker);
-    }
-    return;
-  }
-
-  // Auswertephase: nur noch die nicht-rauschenden Bytes melden.
-  for (size_t i = 0; i < usableLength && i < tracker.previousReportLength; i++)
-  {
-    const uint8_t previousValue = tracker.previousReport[i];
-    const uint8_t currentValue  = report[i];
-
-    if (currentValue == previousValue || tracker.isNoisyByte[i] ||
-        isPartOfKnownStickField(tracker, i))
-    {
-      continue;
-    }
-
-    uint8_t changedBits = static_cast<uint8_t>(previousValue ^ currentValue);
-
-    // Bekannte Bits als Klartextnamen melden und aus der Restmaske entfernen.
-    if (shouldPrintButtonNames && tracker.buttonMappings != nullptr)
-    {
-      for (size_t m = 0; m < tracker.buttonMappingCount; m++)
-      {
-        const Switch2ButtonMapping &mapping = tracker.buttonMappings[m];
-        if (mapping.byteOffset != i || (changedBits & mapping.bitMask) == 0)
-        {
-          continue;
-        }
-
-        Serial.printf("[BTN]   %s: %s %s\n",
-                      tracker.controllerName,
-                      mapping.buttonName,
-                      (currentValue & mapping.bitMask) != 0 ? "gedrueckt" : "losgelassen");
-        changedBits = static_cast<uint8_t>(changedBits & ~mapping.bitMask);
-      }
-    }
-
-    if (changedBits == 0)
-    {
-      continue;
-    }
-
-    // Was uebrig bleibt, ist entweder nicht zugeordnet oder die Klartextausgabe
-    // ist abgeschaltet. In beiden Faellen roh melden - ein unbekanntes Signal
-    // darf nicht stillschweigend verschwinden.
-    const uint8_t setBits     = static_cast<uint8_t>(changedBits & currentValue);
-    const uint8_t clearedBits = static_cast<uint8_t>(changedBits & previousValue);
-
-    Serial.printf("[DIFF]  %s / %s: byte 0x%02X: 0x%02X -> 0x%02X",
-                  tracker.controllerName, tracker.reportName,
-                  static_cast<unsigned>(i), previousValue, currentValue);
-    if (setBits != 0)
-    {
-      Serial.printf("   bits gesetzt: 0x%02X", setBits);
-    }
-    if (clearedBits != 0)
-    {
-      Serial.printf("   bits geloescht: 0x%02X", clearedBits);
-    }
-    Serial.println();
-  }
-
+  reportChangedBytes(tracker, report, usableLength);
   printStickDeflection(tracker, report, usableLength);
 
   // Beide Joy-Cons steuern die Maschine. Hier wird der Zustand lediglich
@@ -957,8 +660,7 @@ static void handleIncomingReport(ReportTracker &tracker, const uint8_t *report, 
                     readControlStateFromReport(report, usableLength,
                                                trackerStickCalibration(tracker)));
 
-  memcpy(tracker.previousReport, report, usableLength);
-  tracker.previousReportLength = usableLength;
+  rememberReport(tracker, report, usableLength);
 }
 
 // --- Steuerbefehle an den Python-Server -------------------------------------
@@ -1071,14 +773,9 @@ static bool subscribeToReport(NimBLERemoteService         *service,
     return false;
   }
 
-  tracker.controllerName     = controllerName;
-  tracker.reportName         = reportName;
-  tracker.controllerType     = controllerType;
-  tracker.firstStickOffset   = firstStickOffset;
-  tracker.secondStickOffset  = secondStickOffset;
-  tracker.buttonMappings     = buttonMappings;
-  tracker.buttonMappingCount = buttonMappingCount;
-  resetReportTracker(tracker);
+  configureReportTracker(tracker, controllerName, reportName, controllerType,
+                         firstStickOffset, secondStickOffset,
+                         buttonMappings, buttonMappingCount);
 
   ReportTracker *trackerPointer = &tracker;
   const bool didSubscribe = characteristic->subscribe(
@@ -1438,7 +1135,8 @@ class Switch2ScanCallbacks : public NimBLEScanCallbacks
         break;
       }
     }
-    const bool isWakeAdvertisement = data[MANUFACTURER_DATA_WAKE_FLAG_OFFSET] == MANUFACTURER_DATA_WAKE_FLAG_VALUE;
+    const bool isWakeAdvertisement =
+        data[MANUFACTURER_DATA_WAKE_FLAG_OFFSET] == MANUFACTURER_DATA_WAKE_FLAG_VALUE;
     const bool isPairingMode       = !hasHostAddress && !isWakeAdvertisement;
 
     // Steht in der Host-Adresse unsere eigene, dann sucht der Controller uns
@@ -1559,20 +1257,23 @@ static void handleSerialCommands()
     switch (command)
     {
       case 'b':
-        shouldPrintButtonNames = !shouldPrintButtonNames;
+        reportDiagnostics.shouldPrintButtonNames = !reportDiagnostics.shouldPrintButtonNames;
         Serial.printf("[CMD]   Tastenausgabe: %s\n",
-                      shouldPrintButtonNames ? "Klartextnamen" : "rohe Bitmasken");
+                      reportDiagnostics.shouldPrintButtonNames ? "Klartextnamen"
+                                                                : "rohe Bitmasken");
         break;
       case 'd':
-        shouldPrintFullHexDump = !shouldPrintFullHexDump;
-        Serial.printf("[CMD]   Vollhexdump: %s\n", shouldPrintFullHexDump ? "an" : "aus");
+        reportDiagnostics.shouldPrintFullHexDump = !reportDiagnostics.shouldPrintFullHexDump;
+        Serial.printf("[CMD]   Vollhexdump: %s\n",
+                      reportDiagnostics.shouldPrintFullHexDump ? "an" : "aus");
         break;
       case 'r':
         resetAllTrackers();
         break;
       case 's':
-        shouldPrintStickValues = !shouldPrintStickValues;
-        Serial.printf("[CMD]   Stick-Ausgabe: %s\n", shouldPrintStickValues ? "an" : "aus");
+        reportDiagnostics.shouldPrintStickValues = !reportDiagnostics.shouldPrintStickValues;
+        Serial.printf("[CMD]   Stick-Ausgabe: %s\n",
+                      reportDiagnostics.shouldPrintStickValues ? "an" : "aus");
         break;
       case 'v':
         // Derselbe Weg wie beim Tastendruck: gesendet wird gleich im loop().
