@@ -103,6 +103,24 @@
 #ifndef CLAW_PANEL_PIN_BACK
 #define CLAW_PANEL_PIN_BACK    22
 #endif
+
+#ifndef CLAW_ENDSTOP_X_1
+#define CLAW_ENDSTOP_X_1 17
+#endif
+#ifndef CLAW_ENDSTOP_X_2
+#define CLAW_ENDSTOP_X_2 21
+#endif
+#ifndef CLAW_ENDSTOP_Y_1
+#define CLAW_ENDSTOP_Y_1 22
+#endif
+#ifndef CLAW_ENDSTOP_Y_2
+#define CLAW_ENDSTOP_Y_2 3
+#endif
+#ifndef CLAW_ENDSTOP_Z_1
+#define CLAW_ENDSTOP_Z_1 1
+#endif
+
+
 // Greifen/Loslassen kommt vom Potentiometer an SVP, nicht von Tastern.
 // Muss ein ADC1-Pin sein (32, 33, 34, 35, 36, 39) — ADC2-Pins liefern
 // bei aktivem WiFi keine gültigen Messwerte.
