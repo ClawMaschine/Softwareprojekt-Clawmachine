@@ -47,6 +47,10 @@ MOTOR_CONTROLLER_COMMAND_TOPIC = "clawmachine/motor_controller/motor/command"
 # separates Topic von den X:/Y:/Z:/claw:-Bewegungsbefehlen, siehe
 # onMqttMessage() in src_claw_motor_controller/main.cpp.
 MOTOR_CONTROLLER_SETTINGS_TOPIC = "clawmachine/motor_controller/settings"
+# Rohstatus des Endstop-Boards (ENDSTOP_TOPIC, JSON) wird hierueber an den
+# Motor-Controller weitergereicht — der spricht nie direkt mit dem
+# Endstop-Board, nur ueber den Server (siehe docs/technical/architecture.html).
+MOTOR_CONTROLLER_ENDSTOP_TOPIC = "clawmachine/motor_controller/endstop"
 MOTOR_COMMAND_PREFIXES = ("X:", "Y:", "Z:", "claw:")
 
 PLAYER_INPUT_PANEL_TOPIC = "clawmachine/player_input/panel"
@@ -152,11 +156,17 @@ class ClawMachine:
         # der Default für alles, was zu keinem bekannten Topic passt.
         match topic:
             case _ if topic == ENDSTOP_TOPIC:
-                if payload_text not in ("X:0", "X:1", "Y:0", "Y:1"):
+                # Rohstatus vom Endstop-Board, z.B. {"x1":0,"x2":0,"y1":0,"y2":0,"z1":0}.
+                try:
+                    json.loads(payload_text)
+                except json.JSONDecodeError:
                     print(f"Invalid endstop state received: {payload_text}")
                     return
-                # Endstop-Status vom Motor-Controller (z.B. "X:1", "Y:0") — direkt an das Webinterface weiterleiten
-                self.mqtt_client.publish(f"clawmachine/web_interface/endstop", payload_text)
+                # Unveraendert weiterreichen — an den Motor-Controller (fuer homing(),
+                # siehe setEndstopXTriggered() in claw_motor_controller.cpp) und ans
+                # Webinterface (Anzeige).
+                self.mqtt_client.publish(MOTOR_CONTROLLER_ENDSTOP_TOPIC, payload_text)
+                self.mqtt_client.publish("clawmachine/web_interface/endstop", payload_text)
             
             
             case _ if topic in PLAYER_INPUT_TOPICS or topic == WEBINTERFACE_COMMAND_TOPIC:
@@ -172,8 +182,8 @@ class ClawMachine:
                 MOTOR_COMMAND_PREFIXES
             ):
                 
-                self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
-
+                self.movecontroller.move(payload_text)
+                # self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
             # 1) Heartbeat/Laufzeit eines Geräts (clawmachine/<name>/metadata/uptime) —
             #    taucht ein Gerätename hier zum ersten Mal auf, wird er automatisch
             #    registriert (siehe ensure_device_registered)

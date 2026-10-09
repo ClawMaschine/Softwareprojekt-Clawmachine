@@ -61,6 +61,69 @@ void ClawMotorController::update()
 }
 
 
+void ClawMotorController::homing(char axis)
+{
+  switch (axis) {
+    case 'X':
+      isEndstopXTriggered = false; // alten Zustand verwerfen, falls schon mal ausgeloest
+      move('X', -10);              // langsam Richtung Endstop fahren
+
+      while (!isEndstopXTriggered) {
+        connection.maintainConnection(); // MQTT pumpen, sonst wuerde der Endstop-Callback nie feuern
+        update();                        // Rampe weiterlaufen lassen, sonst bleibt der Motor stehen
+      }
+
+      move('X', 0); // Endstop erreicht -> anhalten
+      Serial.println("[MOTOR] Homing X abgeschlossen");
+      break;
+
+    case 'Y':
+      isEndstopYTriggered = false;
+      move('Y', -10);
+
+      while (!isEndstopYTriggered) {
+        connection.maintainConnection();
+        update();
+      }
+
+      move('Y', 0);
+      Serial.println("[MOTOR] Homing Y abgeschlossen");
+      break;
+
+    case 'Z':
+      isEndstopZTriggered = false;
+      moveZ(-10);
+
+      while (!isEndstopZTriggered) {
+        connection.maintainConnection();
+        update();
+      }
+
+      moveZ(0);
+      Serial.println("[MOTOR] Homing Z abgeschlossen");
+      break;
+
+    default:
+      Serial.printf("[MOTOR] Unbekannte Achse: %c\n", axis);
+      break;
+  }
+}
+
+void ClawMotorController::setEndstopXTriggered(bool isTriggered)
+{
+  isEndstopXTriggered = isTriggered;
+}
+
+void ClawMotorController::setEndstopYTriggered(bool isTriggered)
+{
+  isEndstopYTriggered = isTriggered;
+}
+
+void ClawMotorController::setEndstopZTriggered(bool isTriggered)
+{
+  isEndstopZTriggered = isTriggered;
+}
+
 void ClawMotorController::move(char axis, int speed)
 {
   switch (axis) {
