@@ -13,6 +13,7 @@
 #include "claw_mqtt_connection.h"
 #include "firmware_config.h"
 #include "switch2_pairing.h"
+#include "switch2_protocol.h"
 
 // ============================================================================
 // Stufe 1: Rohsignale eines Nintendo-Switch-2-Controllers abfangen.
@@ -63,82 +64,6 @@
 //   p = Pairing-Handshake starten (siehe switch2_pairing.h)
 //   h = Hilfe
 // ============================================================================
-
-// --- Protokollkonstanten (bluetooth_interface.md) ---------------------------
-
-static constexpr uint16_t NINTENDO_MANUFACTURER_ID  = 0x0553;
-static constexpr uint16_t NINTENDO_VENDOR_ID        = 0x057E;
-static constexpr uint16_t SWITCH2_LOWEST_PRODUCT_ID = 0x2060;
-
-static constexpr size_t MANUFACTURER_DATA_MINIMUM_LENGTH  = 0x13;
-static constexpr size_t MANUFACTURER_DATA_VENDOR_OFFSET   = 0x05;
-static constexpr size_t MANUFACTURER_DATA_PRODUCT_OFFSET  = 0x07;
-static constexpr size_t MANUFACTURER_DATA_WAKE_FLAG_OFFSET = 0x0B;
-static constexpr size_t MANUFACTURER_DATA_HOST_ADDRESS_OFFSET = 0x0C;
-static constexpr size_t MANUFACTURER_DATA_HOST_ADDRESS_LENGTH = 6;
-
-// Service, unter dem alle Input-Reports haengen (GATT-Handles 0x0008-0x002a).
-static const char *SWITCH2_INPUT_SERVICE_UUID = "ab7de9be-89fe-49ad-828f-118f09df7fd0";
-
-// Input Report 0x05 auf Handle 0x000A - bei ALLEN Controllertypen vorhanden.
-static const char *COMMON_INPUT_REPORT_UUID = "ab7de9be-89fe-49ad-828f-118f09df7fd2";
-
-// --- Befehlskanal -----------------------------------------------------------
-//
-// Befehle gehen an Handle 0x0016 ("Rumble + Command"), NICHT an das
-// naheliegendere Handle 0x0014 ("Command"). Das ist am Mitschnitt der echten
-// Konsole abgelesen: in btle_joycon2_pairing_decrypted.pcapng gehen alle 24
-// Befehle - Vibration, LEDs, Firmware-Abfrage, Pairing - an 0x0016, und 0x0014
-// wird kein einziges Mal benutzt. Deshalb nehmen wir den belegten Weg.
-//
-// Vor dem Befehlsheader stehen dabei 17 Byte: eine Report-ID und 16 Byte
-// HD-Rumble-Daten. Wer nur einen Befehl schicken will, laesst sie auf Null.
-//
-// Die UUID von 0x0016 ist wie die Input-UUID pro Controllertyp verschieden und
-// steht deshalb in CONTROLLER_SPECIFIC_REPORTS.
-
-// Handle 0x001A, NOTIFY: Antwort im selben Headerformat, Richtungsbyte 0x01.
-// Diese Characteristic ist bei allen Controllertypen dieselbe.
-static const char *SWITCH2_COMMAND_RESPONSE_UUID = "c765a961-d9d8-4d36-a20a-5315b111836a";
-
-// Report-ID (1 Byte) + HD-Rumble (16 Byte) vor dem Befehlsheader.
-static constexpr size_t COMMAND_RUMBLE_PREFIX_LENGTH = 17;
-
-// --- Befehlsformat (commands.md) --------------------------------------------
-//
-// Der Header ist 8 Byte lang, danach folgen die Befehlsdaten:
-//
-//   0x0  Command ID        z.B. 0x0A = Vibration
-//   0x1  Richtung          0x91 = Host -> Geraet, 0x01 = Geraet -> Host
-//   0x2  Transport         0x01 = Bluetooth
-//   0x3  Subcommand ID
-//   0x4  unbekannt         0x00
-//   0x5  Datenlaenge       Anzahl der Bytes nach dem Header
-//   0x6  reserviert        0x00
-//   0x7  reserviert        0x00
-
-static constexpr size_t  COMMAND_HEADER_LENGTH        = 8;
-static constexpr uint8_t COMMAND_DIRECTION_HOST_TO_DEVICE = 0x91;
-static constexpr uint8_t COMMAND_DIRECTION_DEVICE_TO_HOST = 0x01;
-static constexpr uint8_t COMMAND_TRANSPORT_BLUETOOTH   = 0x01;
-
-static constexpr uint8_t COMMAND_ID_VIBRATION          = 0x0A;
-static constexpr uint8_t VIBRATION_SUBCOMMAND_PLAY_SAMPLE = 0x02;
-
-// Vordefinierte Muster im Controller. 0x00 stoppt eine laufende Ausgabe.
-static constexpr uint8_t VIBRATION_SAMPLE_SILENCE     = 0x00;
-static constexpr uint8_t VIBRATION_SAMPLE_SOFT_CLICK  = 0x03;
-static constexpr uint8_t VIBRATION_SAMPLE_STRONG_CLICK = 0x05;
-
-// Kurz und deutlich spuerbar - als Rueckmeldung auf einen Tastendruck genau
-// richtig, ohne den Controller sekundenlang brummen zu lassen. Die Konsole
-// selbst schickt an dieser Stelle 0x03; falls 0x05 am Geraet nicht ankommt,
-// ist der Wechsel auf VIBRATION_SAMPLE_SOFT_CLICK der erste Versuch, denn
-// dieses Muster ist im Mitschnitt byteweise belegt.
-static constexpr uint8_t VIBRATION_SAMPLE_FOR_BUTTON_FEEDBACK = VIBRATION_SAMPLE_STRONG_CLICK;
-
-// Sample-ID plus drei ungenutzte Bytes.
-static constexpr size_t VIBRATION_SAMPLE_DATA_LENGTH = 4;
 
 // --- Controllertyp-Erkennung ------------------------------------------------
 //
@@ -368,9 +293,6 @@ static const Switch2ReportDescription CONTROLLER_SPECIFIC_REPORTS[] = {
 static constexpr size_t CONTROLLER_SPECIFIC_REPORT_COUNT =
     sizeof(CONTROLLER_SPECIFIC_REPORTS) / sizeof(CONTROLLER_SPECIFIC_REPORTS[0]);
 
-// Report 0x05 fuehrt beide Sticks in einem gemeinsamen Feld (hid_reports.md).
-static constexpr uint8_t COMMON_REPORT_LEFT_STICK_OFFSET  = 0x0A;
-static constexpr uint8_t COMMON_REPORT_RIGHT_STICK_OFFSET = 0x0D;
 
 // --- Laufzeitschalter -------------------------------------------------------
 
@@ -394,7 +316,6 @@ static bool shouldPrintButtonNames  = true;
 // als Rauschen markiert und danach aus der Diff-Ausgabe ausgeblendet - sonst
 // waere die Konsole unbrauchbar. Der Vollhexdump ('d') zeigt trotzdem alles.
 
-static constexpr size_t   MAXIMUM_REPORT_LENGTH        = 64;
 static constexpr uint16_t NOISE_LEARNING_SAMPLE_COUNT  = 100;
 static constexpr uint8_t  NOISE_CHANGE_PERCENT_THRESHOLD = 25;
 
@@ -648,9 +569,6 @@ static bool sendControllerCommand(ControllerSession *session,
     return false;
   }
 
-  // Groesster bisher benoetigter Befehl ist der Pairing-Schluesseltausch mit
-  // 17 Datenbytes. 32 laesst Luft, ohne den Stack unnoetig zu belasten.
-  static constexpr size_t MAXIMUM_COMMAND_DATA_LENGTH = 32;
   if (dataLength > MAXIMUM_COMMAND_DATA_LENGTH)
   {
     Serial.println("[CMD]   Befehlsdaten zu lang - nicht gesendet.");
@@ -1789,7 +1707,7 @@ class Switch2ScanCallbacks : public NimBLEScanCallbacks
         break;
       }
     }
-    const bool isWakeAdvertisement = data[MANUFACTURER_DATA_WAKE_FLAG_OFFSET] == 0x81;
+    const bool isWakeAdvertisement = data[MANUFACTURER_DATA_WAKE_FLAG_OFFSET] == MANUFACTURER_DATA_WAKE_FLAG_VALUE;
     const bool isPairingMode       = !hasHostAddress && !isWakeAdvertisement;
 
     // Steht in der Host-Adresse unsere eigene, dann sucht der Controller uns
