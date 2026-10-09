@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from http import client
 import json
 import time
-from tkinter import END
 from typing import Optional
 
 try:
