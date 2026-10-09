@@ -17,7 +17,7 @@ ClawMqttConnection mqttConnection(
     CLAW_CLIENT_WIFI_PASSWORD,
     CLAW_MQTT_BROKER_HOST,
     CLAW_MQTT_BROKER_PORT,
-    "claw_panel_test",
+    CLAW_PLAYER_INPUT_CLIENT_ID,
     CLAW_MQTT_USER_USERNAME,
     CLAW_MQTT_USER_PASSWORD,
     CLAW_CONNECTION_RETRY_INTERVAL_MS);
@@ -60,15 +60,14 @@ void publishPanelState()
   snprintf(
       payload,
       sizeof(payload),
-      "{\"up\":%d,\"down\":%d,\"left\":%d,\"right\":%d,\"front\":%d,\"back\":%d,\"grab\":%d,\"release\":%d}",
+      "{\"up\":%d,\"down\":%d,\"left\":%d,\"right\":%d,\"front\":%d,\"back\":%d,\"claw\":%d}",
       panelInput.up_button,
       panelInput.down_button,
       panelInput.left_button,
       panelInput.right_button,
       panelInput.front_button,
       panelInput.back_button,
-      panelInput.grab_button,
-      panelInput.release_button);
+      panelInput.claw);
 
 if (strcmp(payload, payload_backup) != 0)
   {
@@ -92,7 +91,7 @@ void setup()
 {
   Serial.begin(115200);
   delay(500);
-  Serial.println("[PANEL] Panel-Test startet");
+  Serial.println("[PANEL] Panel-Input startet");
 
   mqttConnection.begin();
   panelInput.begin();
