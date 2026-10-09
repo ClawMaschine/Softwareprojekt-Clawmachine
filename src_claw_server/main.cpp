@@ -8,6 +8,8 @@ static constexpr const char *ENDSTOP_TOPIC = "clawmachine/endstop/state";
 static constexpr uint8_t endstopXOnePin = CLAW_ENDSTOP_X_1;
 static constexpr uint8_t endstopXTwoPin = CLAW_ENDSTOP_X_2;
 static constexpr uint8_t endstopYOnePin = CLAW_ENDSTOP_Y_1;
+static constexpr uint8_t endstopYTwoPin = CLAW_ENDSTOP_Y_2; 
+static constexpr uint8_t endstopZOnePin = CLAW_ENDSTOP_Z_1;
 
 ClawMqttConnection endstopConnection(
     CLAW_CLIENT_WIFI_SSID,
@@ -28,15 +30,19 @@ void publishEndstopStateIfChanged()
   const bool isEndstopXOneTriggered = digitalRead(endstopXOnePin) == LOW;
   const bool isEndstopXTwoTriggered = digitalRead(endstopXTwoPin) == LOW;
   const bool isEndstopYOneTriggered = digitalRead(endstopYOnePin) == LOW;
+  const bool isEndstopYTwoTriggered = digitalRead(endstopYTwoPin) == LOW; // Currently not used, but can be added if needed
+  const bool isEndstopZOneTriggered = digitalRead(endstopZOnePin) == LOW; // Currently not used, but can be added if needed
 
   char payload[96];
   snprintf(
       payload,
       sizeof(payload),
-      "{\"x1\":%d,\"x2\":%d,\"y1\":%d}",
+      "{\"x1\":%d,\"x2\":%d,\"y1\":%d, \"y2\":%d,\"z1\":%d}",
       isEndstopXOneTriggered,
       isEndstopXTwoTriggered,
-      isEndstopYOneTriggered);
+      isEndstopYOneTriggered, 
+      isEndstopYTwoTriggered,
+      isEndstopZOneTriggered);
 
   if (strcmp(payload, lastPublishedEndstopPayload) == 0)
   {
@@ -62,6 +68,8 @@ void setup()
   pinMode(endstopXOnePin, INPUT_PULLUP);
   pinMode(endstopXTwoPin, INPUT_PULLUP);
   pinMode(endstopYOnePin, INPUT_PULLUP);
+  pinMode(endstopYTwoPin, INPUT_PULLUP);
+  pinMode(endstopZOnePin, INPUT_PULLUP);
 
   endstopConnection.begin();
 }
