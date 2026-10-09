@@ -47,6 +47,11 @@ MOTOR_CONTROLLER_SETTINGS_TOPIC = "clawmachine/motor_controller/settings"
 MOTOR_COMMAND_PREFIXES = ("X:", "Y:", "Z:", "claw:")
 
 PLAYER_INPUT_PANEL_TOPIC = "clawmachine/player_input/panel"
+# Nintendo-Switch-2-Joy-Con, gesendet von src_claw_switch2_scanner. Gleiches
+# JSON-Format wie das Control-Panel, deshalb dieselbe Auswertung — nur ohne
+# grab/release, die beim Joy-Con keine Entsprechung haben.
+PLAYER_INPUT_JOYCON_TOPIC = "clawmachine/player_input/joycon"
+PLAYER_INPUT_TOPICS = (PLAYER_INPUT_PANEL_TOPIC, PLAYER_INPUT_JOYCON_TOPIC)
 WEBINTERFACE_COMMAND_TOPIC = "clawmachine/web_interface/command"
 PANEL_MOTOR_SPEED = 130
 
@@ -97,6 +102,7 @@ class ClawMachine:
         mqtt_network_client.subscribe(INTERNAL_TOPIC_WILDCARD)
         mqtt_network_client.subscribe(DEVICE_STATUS_TOPIC_WILDCARD)
         mqtt_network_client.subscribe(PLAYER_INPUT_PANEL_TOPIC)
+        mqtt_network_client.subscribe(PLAYER_INPUT_JOYCON_TOPIC)
         mqtt_network_client.subscribe(WEBINTERFACE_COMMAND_TOPIC)
         mqtt_network_client.subscribe(DEVICE_LIST_REQUEST_TOPIC)
         mqtt_network_client.on_message = self.on_message
@@ -139,7 +145,7 @@ class ClawMachine:
         # Treffer gewinnt, kein Fallthrough — der abschließende `case _` ist
         # der Default für alles, was zu keinem bekannten Topic passt.
         match topic:
-            case _ if topic in (PLAYER_INPUT_PANEL_TOPIC, WEBINTERFACE_COMMAND_TOPIC):
+            case _ if topic in PLAYER_INPUT_TOPICS or topic == WEBINTERFACE_COMMAND_TOPIC:
                 self.on_control_command(topic, payload_text)
 
             # Webinterface fragt aktiv nach der aktuellen Geräteliste
@@ -182,14 +188,14 @@ class ClawMachine:
     def on_control_command(self, topic: str, payload_text: str):
         
         match topic:
-            case _ if topic == PLAYER_INPUT_PANEL_TOPIC:
+            case _ if topic in PLAYER_INPUT_TOPICS:
                 panel_buttons = json.loads(payload_text)
                 self.panel_button_state.update(panel_buttons)
 
                 if self.panel_button_state.get("right"):
-                    x_speed = -PANEL_MOTOR_SPEED
-                elif self.panel_button_state.get("left"):
                     x_speed = PANEL_MOTOR_SPEED
+                elif self.panel_button_state.get("left"):
+                    x_speed = -PANEL_MOTOR_SPEED
                 else:
                     x_speed = 0
 

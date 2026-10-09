@@ -23,4 +23,7 @@ config.local.ini
 **/local_components
 local_components
 
+# Serielle Monitor-Mitschnitte (pio device monitor -f log2file)
+logs/
+
 **/__pycache__/

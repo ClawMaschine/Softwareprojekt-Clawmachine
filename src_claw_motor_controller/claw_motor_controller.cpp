@@ -73,6 +73,7 @@ void ClawMotorController::move(char axis, int speed)
       Serial.printf("[MOTOR] X: %d\n", speed);
       break;
     case 'Y':
+      speed = -speed; // Invertiere Geschwindigkeit, damit positive Werte nach rechts/vorne/hoch fahren.
       currentY = speed;
       yMotor.setSpeed(speed);
       Serial.printf("[MOTOR] Y: %d\n", speed);
