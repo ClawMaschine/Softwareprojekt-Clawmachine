@@ -47,10 +47,6 @@ MOTOR_CONTROLLER_COMMAND_TOPIC = "clawmachine/motor_controller/motor/command"
 # separates Topic von den X:/Y:/Z:/claw:-Bewegungsbefehlen, siehe
 # onMqttMessage() in src_claw_motor_controller/main.cpp.
 MOTOR_CONTROLLER_SETTINGS_TOPIC = "clawmachine/motor_controller/settings"
-# Rohstatus des Endstop-Boards (ENDSTOP_TOPIC, JSON) wird hierueber an den
-# Motor-Controller weitergereicht — der spricht nie direkt mit dem
-# Endstop-Board, nur ueber den Server (siehe docs/technical/architecture.html).
-MOTOR_CONTROLLER_ENDSTOP_TOPIC = "clawmachine/motor_controller/endstop"
 MOTOR_COMMAND_PREFIXES = ("X:", "Y:", "Z:", "claw:")
 
 PLAYER_INPUT_PANEL_TOPIC = "clawmachine/player_input/panel"
@@ -98,6 +94,10 @@ class ClawMachine:
         self.panel_button_state = {}
 
         self.setup_message_handlers()
+
+        # Subscriptions muessen vorher stehen, sonst koennten die
+        # Endstop-Updates, die die Sequenz voranschalten, nie ankommen.
+        self.move_controller.start_homing_sequence()
 
         self.main_loop_started_at = time.time()
         self.main_loop()
@@ -157,15 +157,15 @@ class ClawMachine:
         match topic:
             case _ if topic == ENDSTOP_TOPIC:
                 # Rohstatus vom Endstop-Board, z.B. {"x1":0,"x2":0,"y1":0,"y2":0,"z1":0}.
+                # Der Motor-Controller-ESP bekommt das nicht direkt — Homing
+                # faehrt ausschliesslich der Server (siehe Moving.home_axis()/
+                # update_endstop_status() in moving.py).
                 try:
-                    json.loads(payload_text)
+                    endstop_state = json.loads(payload_text)
                 except json.JSONDecodeError:
                     print(f"Invalid endstop state received: {payload_text}")
                     return
-                # Unveraendert weiterreichen — an den Motor-Controller (fuer homing(),
-                # siehe setEndstopXTriggered() in claw_motor_controller.cpp) und ans
-                # Webinterface (Anzeige).
-                self.mqtt_client.publish(MOTOR_CONTROLLER_ENDSTOP_TOPIC, payload_text)
+                self.move_controller.update_endstop_status(endstop_state)
                 self.mqtt_client.publish("clawmachine/web_interface/endstop", payload_text)
             
             

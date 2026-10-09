@@ -27,24 +27,11 @@ public:
   void moveClaw(const char *command);
   void setAcceleration(float percentPerSecond);
 
-  void homing(char axis);
-  void setEndstopXTriggered(bool isTriggered);
-  void setEndstopYTriggered(bool isTriggered);
-  void setEndstopZTriggered(bool isTriggered);
-
 private:
 
 
   static ClawMotorController *instance;
   ClawMqttConnection &connection;
-
-  // Von onMqttMessage() (main.cpp) per setEndstopXTriggered()/setEndstopYTriggered()
-  // gesetzt, sobald clawmachine/motor_controller/endstop (vom Server weitergeleitet)
-  // meldet, dass der jeweilige Endstop ausgeloest hat. volatile, da aus dem
-  // MQTT-Callback heraus geschrieben und in homing()'s Warteschleife gelesen wird.
-  volatile bool isEndstopXTriggered = false;
-  volatile bool isEndstopYTriggered = false;
-  volatile bool isEndstopZTriggered = false;
 
   uint8_t motorShieldAI2cAddress;
   uint8_t motorShieldBI2cAddress;

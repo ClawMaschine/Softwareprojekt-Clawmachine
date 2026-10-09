@@ -60,7 +60,6 @@ void setup()
   motorControllerConnection.begin();
   motorControllerConnection.subscribe("clawmachine/motor_controller/motor/command");
   motorControllerConnection.subscribe("clawmachine/motor_controller/settings");
-  motorControllerConnection.subscribe("clawmachine/motor_controller/endstop");
 }
 
 void loop()
@@ -95,27 +94,6 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
     if (!jsonDoc["accelerationPercentPerSecond"].isNull()) {
       float newAcceleration = jsonDoc["accelerationPercentPerSecond"].as<float>();
       movementController.setAcceleration(newAcceleration);
-    }
-  } else if (strcmp(topic, "clawmachine/motor_controller/endstop") == 0) {
-    // Vom Python-Server weitergeleiteter Rohstatus des Endstop-Boards, z.B.
-    // {"x1":0,"x2":0,"y1":0,"y2":0,"z1":0} — wir kommen hier nie direkt mit
-    // dem Endstop-Board in Kontakt, nur ueber den Server.
-    JsonDocument jsonDoc;
-    DeserializationError error = deserializeJson(jsonDoc, message);
-    if (error) {
-      Serial.print("[MOTOR_CONTROLLER] Fehler beim Parsen der Endstop-Nachricht: ");
-      Serial.println(error.c_str());
-      return;
-    }
-
-    if (!jsonDoc["x1"].isNull()) {
-      movementController.setEndstopXTriggered(jsonDoc["x1"].as<int>() == 1);
-    }
-    if (!jsonDoc["y1"].isNull()) {
-      movementController.setEndstopYTriggered(jsonDoc["y1"].as<int>() == 1);
-    }
-    if (!jsonDoc["z1"].isNull()) {
-      movementController.setEndstopZTriggered(jsonDoc["z1"].as<int>() == 1);
     }
   } else if (strcmp(topic, "clawmachine/motor_controller/motor/command") == 0) {
     if (message.startsWith("X:")) {
