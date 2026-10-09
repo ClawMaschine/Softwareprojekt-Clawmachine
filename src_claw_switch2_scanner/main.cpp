@@ -1,10 +1,18 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 
+// Fuer die gespeicherte Kopplung wird der NimBLE-Host direkt angesprochen:
+// die Arduino-Huelle bietet kein Einspielen eines fremd ausgehandelten LTK.
+#include "nimble/nimble/host/include/host/ble_gap.h"
+#include "nimble/nimble/host/include/host/ble_store.h"
+
 #include <string.h>
+
+#include <Preferences.h>
 
 #include "claw_mqtt_connection.h"
 #include "firmware_config.h"
+#include "switch2_pairing.h"
 
 // ============================================================================
 // Stufe 1: Rohsignale eines Nintendo-Switch-2-Controllers abfangen.
@@ -41,11 +49,18 @@
 // Testfirmware, die auf das echte Topic sendet. Der Umbau nach
 // src_claw_player_input kommt spaeter.
 //
+// Der Befehlskanal (Handle 0x0014) wird beim Verbinden mit aufgeloest. Darueber
+// laeuft die Testvibration: ein Druck auf A am rechten Joy-Con laesst ihn
+// vibrieren. Das ist zugleich der Nachweis, dass ein ungekoppelter Host
+// Schreibbefehle setzen darf - Voraussetzung fuer den Pairing-Handshake.
+//
 // Serielle Kommandos zur Laufzeit (kein Neuflashen noetig):
 //   b = Tastennamen / rohe Bitmasken
 //   d = kompletten Hexdump jedes Reports an/aus
 //   r = Referenzwerte und Rauschliste zuruecksetzen (Controller ruhig halten)
 //   s = Stick-Dekodierung an/aus
+//   v = Testvibration am rechten Joy-Con ausloesen
+//   p = Pairing-Handshake starten (siehe switch2_pairing.h)
 //   h = Hilfe
 // ============================================================================
 
@@ -67,6 +82,63 @@ static const char *SWITCH2_INPUT_SERVICE_UUID = "ab7de9be-89fe-49ad-828f-118f09d
 
 // Input Report 0x05 auf Handle 0x000A - bei ALLEN Controllertypen vorhanden.
 static const char *COMMON_INPUT_REPORT_UUID = "ab7de9be-89fe-49ad-828f-118f09df7fd2";
+
+// --- Befehlskanal -----------------------------------------------------------
+//
+// Befehle gehen an Handle 0x0016 ("Rumble + Command"), NICHT an das
+// naheliegendere Handle 0x0014 ("Command"). Das ist am Mitschnitt der echten
+// Konsole abgelesen: in btle_joycon2_pairing_decrypted.pcapng gehen alle 24
+// Befehle - Vibration, LEDs, Firmware-Abfrage, Pairing - an 0x0016, und 0x0014
+// wird kein einziges Mal benutzt. Deshalb nehmen wir den belegten Weg.
+//
+// Vor dem Befehlsheader stehen dabei 17 Byte: eine Report-ID und 16 Byte
+// HD-Rumble-Daten. Wer nur einen Befehl schicken will, laesst sie auf Null.
+//
+// Die UUID von 0x0016 ist wie die Input-UUID pro Controllertyp verschieden und
+// steht deshalb in CONTROLLER_SPECIFIC_REPORTS.
+
+// Handle 0x001A, NOTIFY: Antwort im selben Headerformat, Richtungsbyte 0x01.
+// Diese Characteristic ist bei allen Controllertypen dieselbe.
+static const char *SWITCH2_COMMAND_RESPONSE_UUID = "c765a961-d9d8-4d36-a20a-5315b111836a";
+
+// Report-ID (1 Byte) + HD-Rumble (16 Byte) vor dem Befehlsheader.
+static constexpr size_t COMMAND_RUMBLE_PREFIX_LENGTH = 17;
+
+// --- Befehlsformat (commands.md) --------------------------------------------
+//
+// Der Header ist 8 Byte lang, danach folgen die Befehlsdaten:
+//
+//   0x0  Command ID        z.B. 0x0A = Vibration
+//   0x1  Richtung          0x91 = Host -> Geraet, 0x01 = Geraet -> Host
+//   0x2  Transport         0x01 = Bluetooth
+//   0x3  Subcommand ID
+//   0x4  unbekannt         0x00
+//   0x5  Datenlaenge       Anzahl der Bytes nach dem Header
+//   0x6  reserviert        0x00
+//   0x7  reserviert        0x00
+
+static constexpr size_t  COMMAND_HEADER_LENGTH        = 8;
+static constexpr uint8_t COMMAND_DIRECTION_HOST_TO_DEVICE = 0x91;
+static constexpr uint8_t COMMAND_DIRECTION_DEVICE_TO_HOST = 0x01;
+static constexpr uint8_t COMMAND_TRANSPORT_BLUETOOTH   = 0x01;
+
+static constexpr uint8_t COMMAND_ID_VIBRATION          = 0x0A;
+static constexpr uint8_t VIBRATION_SUBCOMMAND_PLAY_SAMPLE = 0x02;
+
+// Vordefinierte Muster im Controller. 0x00 stoppt eine laufende Ausgabe.
+static constexpr uint8_t VIBRATION_SAMPLE_SILENCE     = 0x00;
+static constexpr uint8_t VIBRATION_SAMPLE_SOFT_CLICK  = 0x03;
+static constexpr uint8_t VIBRATION_SAMPLE_STRONG_CLICK = 0x05;
+
+// Kurz und deutlich spuerbar - als Rueckmeldung auf einen Tastendruck genau
+// richtig, ohne den Controller sekundenlang brummen zu lassen. Die Konsole
+// selbst schickt an dieser Stelle 0x03; falls 0x05 am Geraet nicht ankommt,
+// ist der Wechsel auf VIBRATION_SAMPLE_SOFT_CLICK der erste Versuch, denn
+// dieses Muster ist im Mitschnitt byteweise belegt.
+static constexpr uint8_t VIBRATION_SAMPLE_FOR_BUTTON_FEEDBACK = VIBRATION_SAMPLE_STRONG_CLICK;
+
+// Sample-ID plus drei ungenutzte Bytes.
+static constexpr size_t VIBRATION_SAMPLE_DATA_LENGTH = 4;
 
 // --- Controllertyp-Erkennung ------------------------------------------------
 //
@@ -156,6 +228,13 @@ static constexpr uint8_t JOYCON_MASK_DIRECTION_LEFT  = 0x04;
 static constexpr uint8_t JOYCON_MASK_DIRECTION_UP    = 0x08;
 static constexpr uint8_t JOYCON_MASK_SHOULDER_UPPER  = 0x10;  // L bzw. R
 static constexpr uint8_t JOYCON_MASK_SHOULDER_LOWER  = 0x20;  // ZL bzw. ZR
+
+// Die A-Taste des rechten Joy-Con loest die Testvibration aus. Byte und Maske
+// sind deckungsgleich mit dem Eintrag in JOYCON_RIGHT_BUTTON_MAPPINGS und dort
+// am Geraet gemessen. Bewusst eigene Konstanten statt eines Tabellenzugriffs:
+// die Tabelle beschreibt Anzeigenamen, hier haengt Verhalten dran.
+static constexpr uint8_t JOYCON_RIGHT_A_BUTTON_BYTE = 0x02;
+static constexpr uint8_t JOYCON_RIGHT_A_BUTTON_MASK = 0x02;
 
 // Ab welcher Auslenkung der Stick als Richtung gilt. Darunter passiert nichts.
 static constexpr int8_t JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT = 30;
@@ -254,6 +333,8 @@ struct Switch2ReportDescription
 {
   Switch2ControllerType type;
   const char *characteristicUuid;
+  const char *commandCharacteristicUuid;    // Handle 0x0016, Rumble + Befehle
+  const char *vibrationCharacteristicUuid;  // Handle 0x0012, nur rohe Rumble-Daten
   const char *controllerName;
   const char *reportName;
   uint8_t firstStickOffset;  // 0xFF = kein Stick an bekannter Position
@@ -267,15 +348,19 @@ static constexpr uint8_t NO_STICK_OFFSET = 0xFF;
 
 static const Switch2ReportDescription CONTROLLER_SPECIFIC_REPORTS[] = {
     {Switch2ControllerType::JoyConLeft, "cc1bbbb5-7354-4d32-a716-a81cb241a32a",
+     "ce49a830-dced-48ae-931e-c8cf88aadbea", "289326cb-a471-485d-a8f4-240c14f18241",
      "Joy-Con 2 (L)", "Report 0x07", 0x05, NO_STICK_OFFSET,
      JOYCON_LEFT_BUTTON_MAPPINGS, ARRAY_ELEMENT_COUNT(JOYCON_LEFT_BUTTON_MAPPINGS), false},
     {Switch2ControllerType::JoyConRight, "d5a9e01e-2ffc-4cca-b20c-8b67142bf442",
+     "65a724b3-f1e7-4a61-8078-a342376b27ff", "fa19b0fb-cd1f-46a7-84a1-bbb09e00c149",
      "Joy-Con 2 (R)", "Report 0x08", 0x05, NO_STICK_OFFSET,
      JOYCON_RIGHT_BUTTON_MAPPINGS, ARRAY_ELEMENT_COUNT(JOYCON_RIGHT_BUTTON_MAPPINGS), true},
     {Switch2ControllerType::ProController, "7492866c-ec3e-4619-8258-32755ffcc0f8",
+     "3dacbc7e-6955-40b5-8eaf-6f9809e8b379", "cc483f51-9258-427d-a939-630c31f72b05",
      "Pro Controller 2", "Report 0x09", 0x05, 0x08,
      nullptr, 0, false},
     {Switch2ControllerType::GameCube, "8261cba1-9435-420c-84d6-f0c75a2c8e4d",
+     "af95885e-44b3-4a24-9cf0-483cc129469a", "3f8fb670-ab25-45bf-b540-38c72834d064",
      "NSO GameCube Controller", "Report 0x0A", 0x05, NO_STICK_OFFSET,
      nullptr, 0, false},
 };
@@ -399,6 +484,20 @@ struct ControllerSession
   Switch2ControllerType type;
   ReportTracker         specificReportTracker;
   ReportTracker         commonReportTracker;
+  // Beim Verbinden aufgeloest, nullptr wenn der Controller sie nicht anbietet.
+  // Gehoeren dem NimBLEClient und werden mit ihm freigegeben - deshalb beim
+  // Trennen nur die Zeiger loeschen, niemals selbst freigeben.
+  NimBLERemoteCharacteristic *commandCharacteristic;
+  NimBLERemoteCharacteristic *vibrationCharacteristic;
+
+  // Befehlsantworten treffen im NimBLE-Host-Task ein und werden hier abgelegt,
+  // damit Auswertung und AES im Arduino-Task laufen. Ein Slot genuegt: der
+  // Controller beantwortet immer erst die laufende Anfrage.
+  uint8_t       commandResponse[MAXIMUM_REPORT_LENGTH];
+  size_t        commandResponseLength;
+  volatile bool hasCommandResponse;
+
+  Switch2PairingSession pairing;
 };
 
 static ControllerSession controllerSessions[MAXIMUM_CONTROLLER_SESSIONS];
@@ -427,6 +526,30 @@ struct DeviceRecord
 };
 
 static DeviceRecord deviceRecords[MAXIMUM_TRACKED_DEVICES];
+
+// Die Byte-Reihenfolge der Host-Adresse im Advertisement ist nicht dokumentiert
+// und an einem gekoppelten Geraet auch nicht ablesbar, solange man dessen Host
+// nicht kennt. Deshalb werden beide Richtungen geprueft - eine falsch herum
+// verglichene Adresse waere sonst ein Fehler, der sich als "reagiert nie" tarnt.
+static bool isHostAddressOurs(const uint8_t *advertisedHostAddress)
+{
+  const uint8_t *ownAddress = NimBLEDevice::getAddress().getVal();
+
+  if (memcmp(advertisedHostAddress, ownAddress, MANUFACTURER_DATA_HOST_ADDRESS_LENGTH) == 0)
+  {
+    return true;
+  }
+
+  for (size_t i = 0; i < MANUFACTURER_DATA_HOST_ADDRESS_LENGTH; i++)
+  {
+    if (advertisedHostAddress[i] !=
+        ownAddress[MANUFACTURER_DATA_HOST_ADDRESS_LENGTH - 1 - i])
+    {
+      return false;
+    }
+  }
+  return true;
+}
 
 static DeviceRecord *findOrCreateDeviceRecord(const NimBLEAddress &address)
 {
@@ -480,12 +603,331 @@ static ControllerSession *claimFreeSession(const NimBLEAddress &address)
       controllerSessions[i].isInUse = true;
       controllerSessions[i].address = address;
       controllerSessions[i].type    = Switch2ControllerType::Unknown;
+      controllerSessions[i].commandCharacteristic   = nullptr;
+      controllerSessions[i].vibrationCharacteristic = nullptr;
+      controllerSessions[i].commandResponseLength   = 0;
+      controllerSessions[i].hasCommandResponse      = false;
+      controllerSessions[i].pairing.step            = PairingStep::Idle;
       resetReportTracker(controllerSessions[i].specificReportTracker);
       resetReportTracker(controllerSessions[i].commonReportTracker);
       return &controllerSessions[i];
     }
   }
   return nullptr;
+}
+
+static ControllerSession *findSessionByType(Switch2ControllerType type)
+{
+  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
+  {
+    if (controllerSessions[i].isInUse && controllerSessions[i].type == type)
+    {
+      return &controllerSessions[i];
+    }
+  }
+  return nullptr;
+}
+
+// --- Befehle senden ---------------------------------------------------------
+//
+// Ein Befehl besteht aus drei Teilen, genau wie die Konsole ihn schickt:
+//   17 Byte Praefix (Report-ID + HD-Rumble, hier Null)
+//    8 Byte Befehlsheader
+//    n Byte Befehlsdaten
+//
+// Die Characteristic kann nur WRITE_NR - eine Antwort anzufordern wuerde
+// fehlschlagen. Die Bestaetigung kommt stattdessen als [CMD-RSP]-Notification.
+static bool sendControllerCommand(ControllerSession *session,
+                                  uint8_t            commandId,
+                                  uint8_t            subcommandId,
+                                  const uint8_t     *data,
+                                  size_t             dataLength)
+{
+  if (session == nullptr || session->commandCharacteristic == nullptr)
+  {
+    return false;
+  }
+
+  // Groesster bisher benoetigter Befehl ist der Pairing-Schluesseltausch mit
+  // 17 Datenbytes. 32 laesst Luft, ohne den Stack unnoetig zu belasten.
+  static constexpr size_t MAXIMUM_COMMAND_DATA_LENGTH = 32;
+  if (dataLength > MAXIMUM_COMMAND_DATA_LENGTH)
+  {
+    Serial.println("[CMD]   Befehlsdaten zu lang - nicht gesendet.");
+    return false;
+  }
+
+  uint8_t packet[COMMAND_RUMBLE_PREFIX_LENGTH + COMMAND_HEADER_LENGTH +
+                 MAXIMUM_COMMAND_DATA_LENGTH] = {0};
+
+  uint8_t *header = &packet[COMMAND_RUMBLE_PREFIX_LENGTH];
+  header[0] = commandId;
+  header[1] = COMMAND_DIRECTION_HOST_TO_DEVICE;
+  header[2] = COMMAND_TRANSPORT_BLUETOOTH;
+  header[3] = subcommandId;
+  header[4] = 0x00;
+  header[5] = static_cast<uint8_t>(dataLength);
+  header[6] = 0x00;
+  header[7] = 0x00;
+
+  if (data != nullptr && dataLength > 0)
+  {
+    memcpy(&header[COMMAND_HEADER_LENGTH], data, dataLength);
+  }
+
+  const size_t packetLength = COMMAND_RUMBLE_PREFIX_LENGTH + COMMAND_HEADER_LENGTH + dataLength;
+  return session->commandCharacteristic->writeValue(packet, packetLength, false);
+}
+
+// --- Vibration --------------------------------------------------------------
+//
+// Vordefinierte Muster laufen als Befehl 0x0A/0x02 ueber den Befehlskanal, nicht
+// ueber die Vibrations-Characteristic - die nimmt nur rohe HD-Rumble-Daten.
+//
+// Der Tastendruck wird im NimBLE-Host-Task erkannt, geschrieben wird aber im
+// Arduino-Task: derselbe Grund und dasselbe Muster wie bei
+// pendingConnectAddress und hasPendingControlState. Ein GATT-Write aus dem
+// Host-Task heraus kann den Stack blockieren, der auf genau diesen Task
+// wartet.
+static volatile bool         hasPendingVibration = false;
+static Switch2ControllerType pendingVibrationType = Switch2ControllerType::Unknown;
+
+static void requestVibration(Switch2ControllerType type)
+{
+  pendingVibrationType = type;
+  hasPendingVibration  = true;
+}
+
+static void sendPendingVibration()
+{
+  if (!hasPendingVibration)
+  {
+    return;
+  }
+  const Switch2ControllerType type = pendingVibrationType;
+  hasPendingVibration             = false;
+
+  ControllerSession *session = findSessionByType(type);
+  if (session == nullptr || session->commandCharacteristic == nullptr)
+  {
+    Serial.println("[VIB]   Kein Befehlskanal fuer diesen Controller - nichts gesendet.");
+    return;
+  }
+
+  // Sample-ID plus drei ungenutzte Bytes - exakt das Datenfeld, das die
+  // Konsole im Mitschnitt schickt.
+  const uint8_t vibrationData[VIBRATION_SAMPLE_DATA_LENGTH] = {
+      VIBRATION_SAMPLE_FOR_BUTTON_FEEDBACK, 0x00, 0x00, 0x00};
+
+  const bool didWrite = sendControllerCommand(session,
+                                              COMMAND_ID_VIBRATION,
+                                              VIBRATION_SUBCOMMAND_PLAY_SAMPLE,
+                                              vibrationData,
+                                              sizeof(vibrationData));
+
+  // Der Name steht im Tracker, sobald der Report abonniert ist. Vor dem Abo
+  // gibt es keinen - dann reicht die neutrale Bezeichnung.
+  const char *controllerName = session->specificReportTracker.controllerName != nullptr
+                                   ? session->specificReportTracker.controllerName
+                                   : "Controller";
+
+  Serial.printf("[VIB]   Muster 0x%02X an %s: %s\n",
+                VIBRATION_SAMPLE_FOR_BUTTON_FEEDBACK,
+                controllerName,
+                didWrite ? "gesendet" : "FEHLGESCHLAGEN");
+}
+
+// --- Gespeicherte Kopplungen ------------------------------------------------
+//
+// Der LTK muss einen Neustart ueberleben, sonst waere das Pairing nach jedem
+// Reset wertlos. Abgelegt wird er unter der Adresse des Controllers, damit
+// beide Joy-Cons nebeneinander passen.
+
+static Preferences pairingStorage;
+
+static constexpr const char *PAIRING_STORAGE_NAMESPACE = "switch2";
+
+// NVS-Schluessel duerfen hoechstens 15 Zeichen lang sein. Die Adresse als
+// Hexkette ohne Trenner braucht genau 12.
+static void buildStorageKey(const NimBLEAddress &address, char *keyBuffer, size_t keyBufferLength)
+{
+  const uint8_t *addressBytes = address.getVal();
+  snprintf(keyBuffer, keyBufferLength, "%02x%02x%02x%02x%02x%02x",
+           addressBytes[5], addressBytes[4], addressBytes[3],
+           addressBytes[2], addressBytes[1], addressBytes[0]);
+}
+
+static void storeLongTermKey(const NimBLEAddress &address, const uint8_t *longTermKey)
+{
+  char storageKey[16];
+  buildStorageKey(address, storageKey, sizeof(storageKey));
+
+  pairingStorage.begin(PAIRING_STORAGE_NAMESPACE, false);
+  const size_t written = pairingStorage.putBytes(storageKey, longTermKey, PAIRING_KEY_LENGTH);
+  pairingStorage.end();
+
+  Serial.printf("[PAIR]  LTK unter '%s' gespeichert (%u Byte).\n",
+                storageKey, static_cast<unsigned>(written));
+}
+
+static bool loadLongTermKey(const NimBLEAddress &address, uint8_t *longTermKey)
+{
+  char storageKey[16];
+  buildStorageKey(address, storageKey, sizeof(storageKey));
+
+  pairingStorage.begin(PAIRING_STORAGE_NAMESPACE, true);
+  const size_t read = pairingStorage.getBytes(storageKey, longTermKey, PAIRING_KEY_LENGTH);
+  pairingStorage.end();
+
+  return read == PAIRING_KEY_LENGTH;
+}
+
+// --- Gespeicherte Kopplung nutzen -------------------------------------------
+//
+// ACHTUNG, das ist der einzige Teil dieser Firmware, der noch nicht am Geraet
+// bestaetigt ist. Belegt ist nur: die Reconnect-Verbindung IST verschluesselt.
+// In btle_joycon2_reconnect_encrypted.pcapng sind von 33 ATT-Zugriffen nur 16
+// und von 709 Notifications nur 9 lesbar - der Rest liegt unter der
+// Link-Layer-Verschluesselung.
+//
+// Nintendo handelt den Schluessel ueber die eigene Befehlsschnittstelle aus,
+// nicht ueber SMP. NimBLE kennt diesen Weg nicht, also legen wir das Ergebnis
+// von Hand in seinen Schluesselspeicher und stossen die Verschluesselung an.
+//
+// Nicht gepruefte Annahme: EDIV und Rand sind Null und das Verfahren zaehlt als
+// Secure Connections. Das ist die uebliche Kodierung fuer einen Schluessel
+// ohne Legacy-Aushandlung. Passt sie nicht, lehnt der Controller die
+// Verschluesselung ab - sichtbar als sofortige Trennung nach dem Verbinden.
+static void applyStoredPairing(NimBLEClient *client, const NimBLEAddress &address)
+{
+  uint8_t longTermKey[PAIRING_KEY_LENGTH];
+  if (!loadLongTermKey(address, longTermKey))
+  {
+    return;  // Nie gekoppelt - wie bisher unverschluesselt weiterarbeiten.
+  }
+
+  struct ble_store_value_sec securityValue;
+  memset(&securityValue, 0, sizeof(securityValue));
+  securityValue.peer_addr   = *address.getBase();
+  securityValue.key_size    = PAIRING_KEY_LENGTH;
+  securityValue.ediv        = 0;
+  securityValue.rand_num    = 0;
+  memcpy(securityValue.ltk, longTermKey, PAIRING_KEY_LENGTH);
+  securityValue.ltk_present = 1;
+  securityValue.sc          = 1;
+  securityValue.authenticated = 0;
+
+  // Beide Richtungen: der Host braucht den Schluessel als eigenen und als den
+  // der Gegenstelle, sonst findet er ihn beim Verbinden nicht wieder.
+  const int peerStatus = ble_store_write_peer_sec(&securityValue);
+  const int ownStatus  = ble_store_write_our_sec(&securityValue);
+  if (peerStatus != 0 || ownStatus != 0)
+  {
+    Serial.printf("[PAIR]  LTK konnte nicht hinterlegt werden (peer=%d, own=%d).\n",
+                  peerStatus, ownStatus);
+    return;
+  }
+
+  const int securityStatus = ble_gap_security_initiate(client->getConnHandle());
+  Serial.printf("[PAIR]  Gespeicherte Kopplung genutzt, Verschluesselung angestossen (status=%d).\n",
+                securityStatus);
+}
+
+// --- Pairing-Antrieb --------------------------------------------------------
+//
+// Das Protokoll selbst steckt in switch2_pairing.cpp. Hier wird nur getaktet:
+// Anfrage senden, Antwort abholen, naechsten Schritt anstossen. Alles im
+// Arduino-Task, weil AES und NVS im BLE-Callback nichts zu suchen haben.
+
+static void sendNextPairingRequest(ControllerSession *session)
+{
+  uint8_t subcommandId = 0;
+  uint8_t data[PAIRING_MAXIMUM_REQUEST_DATA_LENGTH] = {0};
+  size_t  dataLength = 0;
+
+  if (!buildPairingRequest(session->pairing, subcommandId, data, dataLength))
+  {
+    return;
+  }
+
+  if (!sendControllerCommand(session, COMMAND_ID_PAIRING, subcommandId, data, dataLength))
+  {
+    Serial.println("[PAIR]  Anfrage konnte nicht gesendet werden - Abbruch.");
+    session->pairing.step = PairingStep::Failed;
+  }
+}
+
+static void startPairingForConnectedControllers()
+{
+  size_t startedCount = 0;
+  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
+  {
+    ControllerSession *session = &controllerSessions[i];
+    if (!session->isInUse || session->commandCharacteristic == nullptr)
+    {
+      continue;
+    }
+
+    startPairing(session->pairing, NimBLEDevice::getAddress().getVal());
+    sendNextPairingRequest(session);
+    startedCount++;
+  }
+
+  if (startedCount == 0)
+  {
+    Serial.println("[PAIR]  Kein verbundener Controller mit Befehlskanal - nichts zu tun.");
+  }
+  else
+  {
+    Serial.printf("[PAIR]  Handshake fuer %u Controller gestartet.\n",
+                  static_cast<unsigned>(startedCount));
+  }
+}
+
+static void advancePairingSessions()
+{
+  const uint32_t nowMs = millis();
+
+  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
+  {
+    ControllerSession *session = &controllerSessions[i];
+    if (!session->isInUse)
+    {
+      continue;
+    }
+
+    if (session->hasCommandResponse)
+    {
+      session->hasCommandResponse = false;
+
+      const uint8_t *response       = session->commandResponse;
+      const size_t   responseLength = session->commandResponseLength;
+
+      // Nur Pairing-Antworten treiben den Handshake. Alles andere ist bereits
+      // als [CMD-RSP] protokolliert und hier nicht von Belang.
+      if (responseLength > COMMAND_HEADER_LENGTH &&
+          response[0] == COMMAND_ID_PAIRING &&
+          response[1] == COMMAND_DIRECTION_DEVICE_TO_HOST)
+      {
+        const bool hasNextStep = handlePairingResponse(session->pairing,
+                                                       response[3],
+                                                       &response[COMMAND_HEADER_LENGTH],
+                                                       responseLength - COMMAND_HEADER_LENGTH);
+        if (hasNextStep)
+        {
+          sendNextPairingRequest(session);
+        }
+        else if (session->pairing.step == PairingStep::Completed)
+        {
+          storeLongTermKey(session->address, session->pairing.longTermKey);
+          Serial.println("[PAIR]  Fertig. Der Controller sollte sich nach einem Neustart");
+          Serial.println("[PAIR]  von selbst wieder melden - ohne Sync-Taste.");
+        }
+      }
+    }
+
+    checkPairingTimeout(session->pairing, nowMs);
+  }
 }
 
 // --- Hilfsfunktionen --------------------------------------------------------
@@ -727,6 +1169,27 @@ static void handleIncomingReport(ReportTracker &tracker, const uint8_t *report, 
     Serial.printf("[BASE]  %s / %s: erster Report empfangen (%u Bytes), lerne Rauschen...\n",
                   tracker.controllerName, tracker.reportName, static_cast<unsigned>(length));
     return;
+  }
+
+  // Testvibration bei steigender Flanke der A-Taste. Bewusst hier oben und
+  // nicht in der Diff-Auswertung: die laeuft erst nach der Lernphase und
+  // wuerde die Rueckmeldung die ersten hundert Reports lang verschlucken.
+  //
+  // Der gemeinsame Report 0x05 wird mit Typ Unknown abonniert und faellt damit
+  // von selbst heraus - sein Tastenlayout ist ein anderes.
+  if (tracker.controllerType == Switch2ControllerType::JoyConRight &&
+      usableLength > JOYCON_RIGHT_A_BUTTON_BYTE &&
+      tracker.previousReportLength > JOYCON_RIGHT_A_BUTTON_BYTE)
+  {
+    const bool wasAButtonPressed =
+        (tracker.previousReport[JOYCON_RIGHT_A_BUTTON_BYTE] & JOYCON_RIGHT_A_BUTTON_MASK) != 0;
+    const bool isAButtonPressed =
+        (report[JOYCON_RIGHT_A_BUTTON_BYTE] & JOYCON_RIGHT_A_BUTTON_MASK) != 0;
+
+    if (isAButtonPressed && !wasAButtonPressed)
+    {
+      requestVibration(Switch2ControllerType::JoyConRight);
+    }
   }
 
   // Lernphase: zaehlen, welche Bytes sich im Ruhezustand staendig aendern.
@@ -987,6 +1450,91 @@ static bool subscribeToReport(NimBLERemoteService         *service,
   return true;
 }
 
+// --- Befehlskanal -----------------------------------------------------------
+//
+// Antworten kommen im selben Headerformat zurueck wie die Anfrage, nur mit
+// Richtungsbyte 0x01. Vorerst werden sie nur protokolliert: fuer die Vibration
+// ist das der Nachweis, dass der Befehl angenommen wurde. Der Pairing-
+// Handshake wertet dieselben Antworten spaeter inhaltlich aus.
+
+static void subscribeToCommandResponse(NimBLERemoteService *service,
+                                       ControllerSession   *session,
+                                       const char          *controllerName)
+{
+  NimBLERemoteCharacteristic *characteristic =
+      service->getCharacteristic(SWITCH2_COMMAND_RESPONSE_UUID);
+  if (characteristic == nullptr || !characteristic->canNotify())
+  {
+    Serial.println("[CMD]   Keine Befehlsantwort-Characteristic - Antworten bleiben unsichtbar.");
+    return;
+  }
+
+  // controllerName zeigt auf ein String-Literal aus CONTROLLER_SPECIFIC_REPORTS
+  // und lebt damit laenger als die Verbindung. Kopieren waere unnoetig.
+  // session zeigt in den statischen Sitzungspool und bleibt ebenfalls gueltig.
+  const bool didSubscribe = characteristic->subscribe(
+      true,
+      [session, controllerName](NimBLERemoteCharacteristic *, uint8_t *data, size_t length, bool)
+      {
+        const size_t usableLength = length > MAXIMUM_REPORT_LENGTH ? MAXIMUM_REPORT_LENGTH : length;
+
+        Serial.printf("[CMD-RSP] %s (%u Bytes): ", controllerName, static_cast<unsigned>(length));
+        printHexBytes(data, usableLength);
+        Serial.println();
+
+        // Nur ablegen und weiterreichen - ausgewertet wird im loop().
+        memcpy(session->commandResponse, data, usableLength);
+        session->commandResponseLength = usableLength;
+        session->hasCommandResponse    = true;
+      });
+
+  if (!didSubscribe)
+  {
+    Serial.println("[CMD]   subscribe() auf die Befehlsantwort fehlgeschlagen.");
+    return;
+  }
+
+  Serial.printf("[CMD]   Befehlsantwort abonniert auf handle 0x%04X\n",
+                characteristic->getHandle());
+}
+
+// Beide Schreibkanaele einmalig aufloesen und in der Session merken. Der
+// Report-Callback darf spaeter nicht selbst im GATT-Baum suchen - er laeuft im
+// NimBLE-Host-Task.
+static void resolveCommandChannel(NimBLERemoteService            *service,
+                                  ControllerSession              *session,
+                                  const Switch2ReportDescription *reportDescription)
+{
+  if (reportDescription == nullptr)
+  {
+    // Ohne erkannten Typ sind beide UUIDs unbekannt - sie sind typabhaengig.
+    Serial.println("[CMD]   Controllertyp unbekannt - kein Befehlskanal.");
+    return;
+  }
+
+  session->commandCharacteristic =
+      service->getCharacteristic(reportDescription->commandCharacteristicUuid);
+  if (session->commandCharacteristic == nullptr)
+  {
+    Serial.println("[CMD]   Befehls-Characteristic 0x0016 nicht gefunden - keine Vibration.");
+  }
+  else
+  {
+    Serial.printf("[CMD]   Befehlskanal auf handle 0x%04X bereit\n",
+                  session->commandCharacteristic->getHandle());
+  }
+
+  session->vibrationCharacteristic =
+      service->getCharacteristic(reportDescription->vibrationCharacteristicUuid);
+  if (session->vibrationCharacteristic != nullptr)
+  {
+    Serial.printf("[CMD]   Vibrationskanal auf handle 0x%04X bereit\n",
+                  session->vibrationCharacteristic->getHandle());
+  }
+
+  subscribeToCommandResponse(service, session, reportDescription->controllerName);
+}
+
 // --- Verbindungsaufbau ------------------------------------------------------
 
 class Switch2ClientCallbacks : public NimBLEClientCallbacks
@@ -1016,7 +1564,11 @@ class Switch2ClientCallbacks : public NimBLEClientCallbacks
       // Zuerst die Steuerung stillsetzen: ohne das bliebe eine gehaltene
       // Richtung stehen und die Maschine fuehre nach dem Abriss weiter.
       clearControlState(session->type);
-      session->isInUse = false;
+      // Die Characteristics gehoeren dem Client, der sich gleich selbst
+      // loescht. Nur die Zeiger fallen lassen, nichts freigeben.
+      session->commandCharacteristic   = nullptr;
+      session->vibrationCharacteristic = nullptr;
+      session->isInUse                 = false;
     }
     NimBLEDevice::getScan()->start(0, false, true);
   }
@@ -1093,6 +1645,11 @@ static void connectToController(const NimBLEAddress &address)
 
   Serial.printf("[CONN]  Verbunden. MTU=%u\n", client->getMTU());
 
+  // Nur wenn zu dieser Adresse ein LTK vorliegt, passiert hier etwas. Ohne
+  // gespeicherte Kopplung bleibt die Verbindung offen wie bisher - ein
+  // Verschluesselungsversuch auf gut Glueck wuerde die Trennung ausloesen.
+  applyStoredPairing(client, address);
+
   DeviceRecord *record = findOrCreateDeviceRecord(address);
   if (record != nullptr)
   {
@@ -1152,6 +1709,9 @@ static void connectToController(const NimBLEAddress &address)
     Serial.println("[TYPE]  Kein bekannter typspezifischer Report gefunden.");
     Serial.println("[TYPE]  Bitte den GATT-Dump oben mit hid_reports.md abgleichen.");
   }
+
+  // Der Befehlskanal haengt am selben Service wie die Input-Reports.
+  resolveCommandChannel(inputService, session, matchedReport);
 
 #if SUBSCRIBE_TO_COMMON_INPUT_REPORT
   subscribeToReport(inputService,
@@ -1232,6 +1792,12 @@ class Switch2ScanCallbacks : public NimBLEScanCallbacks
     const bool isWakeAdvertisement = data[MANUFACTURER_DATA_WAKE_FLAG_OFFSET] == 0x81;
     const bool isPairingMode       = !hasHostAddress && !isWakeAdvertisement;
 
+    // Steht in der Host-Adresse unsere eigene, dann sucht der Controller uns
+    // und nicht seine alte Konsole. Genau dieser Fall soll den Sync-
+    // Tastendruck ueberfluessig machen.
+    const bool isAddressedToUs =
+        hasHostAddress && isHostAddressOurs(&data[MANUFACTURER_DATA_HOST_ADDRESS_OFFSET]);
+
     if (shouldLog)
     {
       record->lastScanLogAtMs = nowMs;
@@ -1249,7 +1815,20 @@ class Switch2ScanCallbacks : public NimBLEScanCallbacks
                         : (hasHostAddress ? "Reconnection-Advertisement (auf anderen Host gekoppelt)"
                                           : "Standard-Advertisement (Pairing-Modus)"));
 
-      if (!isPairingMode)
+      if (hasHostAddress)
+      {
+        const uint8_t *hostAddress = &data[MANUFACTURER_DATA_HOST_ADDRESS_OFFSET];
+        Serial.printf("[SCAN]    Gekoppelt an Host %02x:%02x:%02x:%02x:%02x:%02x%s\n",
+                      hostAddress[5], hostAddress[4], hostAddress[3],
+                      hostAddress[2], hostAddress[1], hostAddress[0],
+                      isAddressedToUs ? "  (das sind WIR)" : "  (fremder Host)");
+      }
+
+      if (isAddressedToUs)
+      {
+        Serial.println("[SCAN]    -> Wir sind der gekoppelte Host, wir duerfen ran.");
+      }
+      else if (!isPairingMode)
       {
         Serial.println("[SCAN]    -> Sync-Taste LANG gedrueckt halten, bis die LEDs laufen.");
         Serial.println("[SCAN]       Kurzer Tastendruck weckt ihn nur fuer seinen alten Host.");
@@ -1266,7 +1845,7 @@ class Switch2ScanCallbacks : public NimBLEScanCallbacks
     // abgewiesen. Jeder solche Fehlversuch zaehlt auf den dokumentierten
     // Cooldown ein, der den Controller danach minutenlang gar nicht mehr
     // reagieren laesst - deshalb erst gar nicht versuchen.
-    if (!isPairingMode)
+    if (!isPairingMode && !isAddressedToUs)
     {
       return;
     }
@@ -1304,6 +1883,8 @@ static void printHelp()
 {
   Serial.println("[HELP]  b = Tastennamen / rohe Bitmasken  | d = Vollhexdump an/aus");
   Serial.println("[HELP]  s = Stick-Ausgabe an/aus          | r = Referenz+Kalibrierung neu");
+  Serial.println("[HELP]  v = Testvibration am rechten Joy-Con (wie ein Druck auf A)");
+  Serial.println("[HELP]  p = Pairing starten (Controller merkt sich diesen ESP32!)");
   Serial.println("[HELP]  h = diese Hilfe");
 }
 
@@ -1344,6 +1925,17 @@ static void handleSerialCommands()
         shouldPrintStickValues = !shouldPrintStickValues;
         Serial.printf("[CMD]   Stick-Ausgabe: %s\n", shouldPrintStickValues ? "an" : "aus");
         break;
+      case 'v':
+        // Derselbe Weg wie beim Tastendruck: gesendet wird gleich im loop().
+        requestVibration(Switch2ControllerType::JoyConRight);
+        Serial.println("[CMD]   Testvibration angefordert.");
+        break;
+      case 'p':
+        // Bewusst nur auf ausdruecklichen Wunsch: ein Joy-Con hat genau einen
+        // Host. Nach dem Pairing verbindet er sich nicht mehr mit der Switch,
+        // bis er dort neu gekoppelt wird.
+        startPairingForConnectedControllers();
+        break;
       case 'h':
         printHelp();
         break;
@@ -1369,6 +1961,10 @@ void setup()
   mqttConnection.begin();
 
   NimBLEDevice::init("");
+  // Ohne die eigene Adresse laesst sich nicht beurteilen, ob ein
+  // Reconnection-Advertisement uns meint oder die Konsole.
+  Serial.printf("[BLE]   Eigene Adresse: %s\n",
+                NimBLEDevice::getAddress().toString().c_str());
   // Kein Bonding, kein MITM, kein Secure Connections. Der Controller trennt
   // die Verbindung, sobald der Host SMP-Pairing initiiert.
   NimBLEDevice::setSecurityAuth(false, false, false);
@@ -1389,6 +1985,8 @@ void loop()
   handleSerialCommands();
   mqttConnection.maintainConnection();
   publishPendingControlState();
+  sendPendingVibration();
+  advancePairingSessions();
 
   if (hasPendingConnectAddress)
   {

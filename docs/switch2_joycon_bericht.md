@@ -211,6 +211,99 @@ Bestätigt wurde dabei auch der dokumentierte Sonderfall, dass der `Generic Attr
 (`0x1801`) keine Kindattribute besitzt (Handle-Bereich `0x0030`–`0x0030`). NimBLE kommt damit
 problemlos zurecht — anders als bei manchen anderen Stacks.
 
+### 5.6 Befehle laufen über Handle `0x0016`, nicht über `0x0014`
+
+Die Dokumentation führt `0x0014` als *„Output Report (Command)"* und `0x0016` als
+*„Rumble + Command"*. Welchen Weg die Konsole tatsächlich benutzt, steht nirgends.
+
+**Gemessen am Mitschnitt der echten Konsole** (`btle_joycon2_pairing_decrypted.pcapng` aus
+ndeadlys Repository, ausgewertet mit einem eigenen pcapng-Parser): von 24 Befehlen — Vibration,
+Player-LEDs, Firmware-Abfrage, Flash-Lesen, Pairing — geht **jeder einzelne an `0x0016`**.
+Handle `0x0014` wird kein einziges Mal beschrieben.
+
+Vor dem 8-Byte-Befehlsheader stehen dabei **17 Byte**: eine Report-ID und 16 Byte
+HD-Rumble-Daten. Wer nur einen Befehl schicken will, lässt sie auf Null. Beispiel Vibration:
+
+```
+Praefix (17 Byte)  00 00*16
+Header  (8 Byte)   0A 91 01 02 00 04 00 00
+Daten   (4 Byte)   03 00 00 00        <- Sample-ID 0x03
+```
+
+Antworten kommen als Notification auf `0x001A`, im selben Headerformat, mit Richtungsbyte
+`0x01` statt `0x91`.
+
+### 5.7 Der Pairing-Befehl ist Command `0x15`
+
+Die Befehls-ID des Pairings steht **in keiner der Textdokumentationen** — weder in
+`bluetooth_interface.md` noch in `commands.md`; der oft zitierte Gist implementiert gar kein
+Live-Pairing, sondern liest LTK und Host-Adresse aus einem SPI-Dump. Aus dem Mitschnitt
+abgelesen ist es **Command `0x15`** mit vier Subcommands in dieser Reihenfolge:
+
+| Schritt | Sub | Host → Joy-Con | Joy-Con → Host |
+| --- | --- | --- | --- |
+| 1 | `0x01` | `00` + Anzahl + zwei Host-Adressen (little endian) | `01` + eigene Adresse |
+| 2 | `0x04` | `00` + Public Key A1 (16 B) | `01` + B1 (16 B) |
+| 3 | `0x02` | `00` + Challenge A2 (16 B) | `01` + B2 (16 B) |
+| 4 | `0x03` | `00` | `01` |
+
+Die Reihenfolge ist `0x01 → 0x04 → 0x02 → 0x03`, also **nicht** aufsteigend.
+
+**Die Krypto wurde an den aufgezeichneten Bytes nachgerechnet** und stimmt:
+
+```
+A1  = 08065a60e902e4e102029e3fa39a78d1   (Konsole)
+B1  = 5cf6ee792cdf05e1ba2b6325c41a5f10   (Controller, laut Doku fest)
+LTK = A1 XOR B1 = 54f0b419c5dde100b829fd1a678027c1
+A2  = 934e580f163aeecfb575fc9136b22fbb   (Challenge der Konsole)
+B2  = 881ae4a3a04b4d75b1941445b178ef2f   (Antwort des Controllers)
+
+AES-128-ECB(Schluessel = reverse(LTK), Klartext = reverse(A2)) == B2   ✔
+```
+
+Beide Umkehrungen sind nötig; jede andere der acht Kombinationen liefert etwas anderes.
+
+Dem Pairing gehen im Mitschnitt vier reine Abfragen voraus (`0x07/0x01`, `0x02/0x04`
+Flash-Lesen, `0x10/0x01` Firmware-Version, `0x16/0x01`). Ob sie Voraussetzung sind oder nur
+Beiwerk, ist offen — die Firmware beginnt direkt mit `0x15/0x01`.
+
+### 5.8 Ein ungekoppelter Host darf Befehle schreiben — gemessen
+
+Aus dem Mitschnitt allein ging das **nicht** hervor: dort schickt die Konsole ihren ersten
+Vibrationsbefehl erst *nach* dem Pairing. Ob ein Host ohne gespeicherte Kopplung überhaupt auf
+`0x0016` schreiben darf, war damit offen — und es war die Voraussetzung dafür, dass der
+Pairing-Handshake über denselben Kanal überhaupt möglich ist.
+
+**Am Gerät bestätigt:** Der ESP32 verbindet sich im Pairing-Modus, ohne jede Kopplung, und ein
+Druck auf **A** am rechten Joy-Con lässt ihn spürbar vibrieren. Der Befehl
+
+```
+Praefix 00 + 16x00 | Header 0A 91 01 02 00 04 00 00 | Daten 05 00 00 00
+```
+
+wird also angenommen. Vibrationsmuster `0x05` (*Strong clicks*) ist deutlich fühlbar; das von
+der Konsole verwendete `0x03` wäre die dezentere Alternative.
+
+Damit ist der Befehlskanal unabhängig vom Pairing nutzbar — auch für Player-LEDs, Batterie-
+status und Rumble-Feedback beim Greifen.
+
+### 5.9 Die Reconnect-Verbindung ist verschlüsselt
+
+Damit steht auch fest, warum Pairing allein nicht reicht. Vergleich der beiden
+Reconnect-Mitschnitte, jeweils 2515 Pakete:
+
+| Datei | lesbare ATT-Writes | lesbare Notifications |
+| --- | --- | --- |
+| `btle_joycon2_reconnect_encrypted.pcapng` | 16 | 9 |
+| `btle_joycon2_reconnect_decrypted.pcapng` | 33 | 709 |
+
+Nach den ersten Paketen verschwindet der Verkehr unter der
+Link-Layer-Verschlüsselung. Ein wiederverbundener Controller erwartet also, dass der Host mit
+dem gespeicherten LTK verschlüsselt. Da NimBLE den Schlüssel nicht selbst ausgehandelt hat,
+muss er von Hand in dessen Schlüsselspeicher gelegt werden
+(`ble_store_write_peer_sec` / `ble_store_write_our_sec`, danach `ble_gap_security_initiate`).
+Ob `EDIV` und `Rand` dabei Null sein müssen, ist die letzte offene Annahme.
+
 ---
 
 ## 6. Gemessene Rohdaten
@@ -230,20 +323,27 @@ Characteristics im Hauptservice `ab7de9be-…-fd0`:
 
 | Handle | UUID | Eigenschaften | Bedeutung |
 | --- | --- | --- | --- |
-| `0x000A` | `ab7de9be-…-fd2` | READ, NOTIFY | Input Report 0x05 (alle Typen) |
-| `0x000E` | `cc1bbbb5-…-1a32a` | READ, NOTIFY | Input Report 0x07 (nur L) |
-| `0x0012` | `289326cb-…-18241` | WRITE_NR | Vibration (nur L) |
-| `0x0014` | `649d4ac9-…-f005` | WRITE_NR | Befehle (alle Typen) |
-| `0x0016` | `ce49a830-…-dbea` | WRITE_NR | Vibration + Befehl (nur L) |
-| `0x0018` | `4147423d-…-9f8d` | WRITE_NR | Firmware-Update |
-| `0x001A` | `c765a961-…-836a` | NOTIFY | Befehlsantwort |
-| `0x001E` | `63a3810f-…-b996` | NOTIFY | Erweiterte Befehlsantwort (nur L) |
-| `0x0022` | `d3bd69d2-…-2a80` | NOTIFY | unbekannt |
-| `0x0026` | `ab7de9be-…-fde` | READ, NOTIFY | unbekannt |
-| `0x002A` | `ab7de9be-…-fdf` | WRITE_NR | unbekannt |
+| `0x000A` | `ab7de9be-89fe-49ad-828f-118f09df7fd2` | READ, NOTIFY | Input Report 0x05 (alle Typen) |
+| `0x000E` | `cc1bbbb5-7354-4d32-a716-a81cb241a32a` | READ, NOTIFY | Input Report 0x07 (nur L) |
+| `0x0012` | `289326cb-a471-485d-a8f4-240c14f18241` | WRITE_NR | Vibration (nur L) |
+| `0x0014` | `649d4ac9-8eb7-4e6c-af44-1ea54fe5f005` | WRITE_NR | Befehle (alle Typen) |
+| `0x0016` | `ce49a830-dced-48ae-931e-c8cf88aadbea` | WRITE_NR | Vibration + Befehl (nur L) |
+| `0x0018` | `4147423d-fdae-4df7-a4f7-d23e5df59f8d` | WRITE_NR | Firmware-Update |
+| `0x001A` | `c765a961-d9d8-4d36-a20a-5315b111836a` | NOTIFY | Befehlsantwort |
+| `0x001E` | `63a3810f-aec7-474b-9010-3d52403cb996` | NOTIFY | Erweiterte Befehlsantwort (nur L) |
+| `0x0022` | `d3bd69d2-841c-4241-ab15-f86f406d2a80` | NOTIFY | unbekannt |
+| `0x0026` | `ab7de9be-89fe-49ad-828f-118f09df7fde` | READ, NOTIFY | unbekannt |
+| `0x002A` | `ab7de9be-89fe-49ad-828f-118f09df7fdf` | WRITE_NR | unbekannt |
 
 Beim rechten Joy-Con stehen an den Stellen `0x000E`, `0x0012`, `0x0016` und `0x001E` die
-Rechts-Varianten `d5a9e01e-…`, `fa19b0fb-…`, `65a724b3-…` und `640ca58e-…`.
+Rechts-Varianten:
+
+| Handle | Joy-Con 2 (R) |
+| --- | --- |
+| `0x000E` | `d5a9e01e-2ffc-4cca-b20c-8b67142bf442` |
+| `0x0012` | `fa19b0fb-cd1f-46a7-84a1-bbb09e00c149` |
+| `0x0016` | `65a724b3-f1e7-4a61-8078-a342376b27ff` |
+| `0x001E` | `640ca58e-0e88-410c-a7f3-426faf2b690b` |
 
 ### 6.2 Verbindungsparameter
 
