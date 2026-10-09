@@ -17,6 +17,8 @@
 #include "switch2_hex_output.h"
 #include "switch2_report_parser.h"
 #include "switch2_report_tracker.h"
+#include "switch2_session.h"
+#include "switch2_command_channel.h"
 #include "switch2_protocol.h"
 
 // ============================================================================
@@ -138,35 +140,6 @@ static void clearControlState(Switch2ControllerType type)
 // aus, weil das Abo nur den Datenverkehr und die Konsolenausgabe verdoppelt.
 #define SUBSCRIBE_TO_COMMON_INPUT_REPORT 0
 
-// --- Verbindungsverwaltung --------------------------------------------------
-
-static constexpr size_t MAXIMUM_CONTROLLER_SESSIONS = 3;
-
-struct ControllerSession
-{
-  bool                  isInUse;
-  NimBLEAddress         address;
-  Switch2ControllerType type;
-  ReportTracker         specificReportTracker;
-  ReportTracker         commonReportTracker;
-  // Beim Verbinden aufgeloest, nullptr wenn der Controller sie nicht anbietet.
-  // Gehoeren dem NimBLEClient und werden mit ihm freigegeben - deshalb beim
-  // Trennen nur die Zeiger loeschen, niemals selbst freigeben.
-  NimBLERemoteCharacteristic *commandCharacteristic;
-  NimBLERemoteCharacteristic *vibrationCharacteristic;
-
-  // Befehlsantworten treffen im NimBLE-Host-Task ein und werden hier abgelegt,
-  // damit Auswertung und AES im Arduino-Task laufen. Ein Slot genuegt: der
-  // Controller beantwortet immer erst die laufende Anfrage.
-  uint8_t       commandResponse[MAXIMUM_REPORT_LENGTH];
-  size_t        commandResponseLength;
-  volatile bool hasCommandResponse;
-
-  Switch2PairingSession pairing;
-};
-
-static ControllerSession controllerSessions[MAXIMUM_CONTROLLER_SESSIONS];
-
 // --- Backoff und Log-Drosselung ---------------------------------------------
 //
 // Ohne Backoff wuerde nach jedem Fehlschlag sofort neu verbunden. Das ueber-
@@ -246,158 +219,6 @@ static DeviceRecord *findOrCreateDeviceRecord(const NimBLEAddress &address)
 // ein verpasster Fund kommt im naechsten Intervall erneut.
 static NimBLEAddress   pendingConnectAddress;
 static volatile bool   hasPendingConnectAddress = false;
-
-static ControllerSession *findSessionByAddress(const NimBLEAddress &address)
-{
-  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
-  {
-    if (controllerSessions[i].isInUse && controllerSessions[i].address == address)
-    {
-      return &controllerSessions[i];
-    }
-  }
-  return nullptr;
-}
-
-static ControllerSession *claimFreeSession(const NimBLEAddress &address)
-{
-  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
-  {
-    if (!controllerSessions[i].isInUse)
-    {
-      controllerSessions[i].isInUse = true;
-      controllerSessions[i].address = address;
-      controllerSessions[i].type    = Switch2ControllerType::Unknown;
-      controllerSessions[i].commandCharacteristic   = nullptr;
-      controllerSessions[i].vibrationCharacteristic = nullptr;
-      controllerSessions[i].commandResponseLength   = 0;
-      controllerSessions[i].hasCommandResponse      = false;
-      controllerSessions[i].pairing.step            = PairingStep::Idle;
-      resetReportTracker(controllerSessions[i].specificReportTracker);
-      resetReportTracker(controllerSessions[i].commonReportTracker);
-      return &controllerSessions[i];
-    }
-  }
-  return nullptr;
-}
-
-static ControllerSession *findSessionByType(Switch2ControllerType type)
-{
-  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
-  {
-    if (controllerSessions[i].isInUse && controllerSessions[i].type == type)
-    {
-      return &controllerSessions[i];
-    }
-  }
-  return nullptr;
-}
-
-// --- Befehle senden ---------------------------------------------------------
-//
-// Ein Befehl besteht aus drei Teilen, genau wie die Konsole ihn schickt:
-//   17 Byte Praefix (Report-ID + HD-Rumble, hier Null)
-//    8 Byte Befehlsheader
-//    n Byte Befehlsdaten
-//
-// Die Characteristic kann nur WRITE_NR - eine Antwort anzufordern wuerde
-// fehlschlagen. Die Bestaetigung kommt stattdessen als [CMD-RSP]-Notification.
-static bool sendControllerCommand(ControllerSession *session,
-                                  uint8_t            commandId,
-                                  uint8_t            subcommandId,
-                                  const uint8_t     *data,
-                                  size_t             dataLength)
-{
-  if (session == nullptr || session->commandCharacteristic == nullptr)
-  {
-    return false;
-  }
-
-  if (dataLength > MAXIMUM_COMMAND_DATA_LENGTH)
-  {
-    Serial.println("[CMD]   Befehlsdaten zu lang - nicht gesendet.");
-    return false;
-  }
-
-  uint8_t packet[COMMAND_RUMBLE_PREFIX_LENGTH + COMMAND_HEADER_LENGTH +
-                 MAXIMUM_COMMAND_DATA_LENGTH] = {0};
-
-  uint8_t *header = &packet[COMMAND_RUMBLE_PREFIX_LENGTH];
-  header[0] = commandId;
-  header[1] = COMMAND_DIRECTION_HOST_TO_DEVICE;
-  header[2] = COMMAND_TRANSPORT_BLUETOOTH;
-  header[3] = subcommandId;
-  header[4] = 0x00;
-  header[5] = static_cast<uint8_t>(dataLength);
-  header[6] = 0x00;
-  header[7] = 0x00;
-
-  if (data != nullptr && dataLength > 0)
-  {
-    memcpy(&header[COMMAND_HEADER_LENGTH], data, dataLength);
-  }
-
-  const size_t packetLength = COMMAND_RUMBLE_PREFIX_LENGTH + COMMAND_HEADER_LENGTH + dataLength;
-  return session->commandCharacteristic->writeValue(packet, packetLength, false);
-}
-
-// --- Vibration --------------------------------------------------------------
-//
-// Vordefinierte Muster laufen als Befehl 0x0A/0x02 ueber den Befehlskanal, nicht
-// ueber die Vibrations-Characteristic - die nimmt nur rohe HD-Rumble-Daten.
-//
-// Der Tastendruck wird im NimBLE-Host-Task erkannt, geschrieben wird aber im
-// Arduino-Task: derselbe Grund und dasselbe Muster wie bei
-// pendingConnectAddress und hasPendingControlState. Ein GATT-Write aus dem
-// Host-Task heraus kann den Stack blockieren, der auf genau diesen Task
-// wartet.
-static volatile bool         hasPendingVibration = false;
-static Switch2ControllerType pendingVibrationType = Switch2ControllerType::Unknown;
-
-static void requestVibration(Switch2ControllerType type)
-{
-  pendingVibrationType = type;
-  hasPendingVibration  = true;
-}
-
-static void sendPendingVibration()
-{
-  if (!hasPendingVibration)
-  {
-    return;
-  }
-  const Switch2ControllerType type = pendingVibrationType;
-  hasPendingVibration             = false;
-
-  ControllerSession *session = findSessionByType(type);
-  if (session == nullptr || session->commandCharacteristic == nullptr)
-  {
-    Serial.println("[VIB]   Kein Befehlskanal fuer diesen Controller - nichts gesendet.");
-    return;
-  }
-
-  // Sample-ID plus drei ungenutzte Bytes - exakt das Datenfeld, das die
-  // Konsole im Mitschnitt schickt.
-  const uint8_t vibrationData[VIBRATION_SAMPLE_DATA_LENGTH] = {
-      VIBRATION_SAMPLE_FOR_BUTTON_FEEDBACK, 0x00, 0x00, 0x00};
-
-  const bool didWrite = sendControllerCommand(session,
-                                              COMMAND_ID_VIBRATION,
-                                              VIBRATION_SUBCOMMAND_PLAY_SAMPLE,
-                                              vibrationData,
-                                              sizeof(vibrationData));
-
-  // Der Name steht im Tracker, sobald der Report abonniert ist. Vor dem Abo
-  // gibt es keinen - dann reicht die neutrale Bezeichnung.
-  const char *controllerName = session->specificReportTracker.controllerName != nullptr
-                                   ? session->specificReportTracker.controllerName
-                                   : "Controller";
-
-  Serial.printf("[VIB]   Muster 0x%02X an %s: %s\n",
-                VIBRATION_SAMPLE_FOR_BUTTON_FEEDBACK,
-                controllerName,
-                didWrite ? "gesendet" : "FEHLGESCHLAGEN");
-}
 
 // --- Gespeicherte Kopplungen ------------------------------------------------
 //
@@ -910,11 +731,7 @@ class Switch2ClientCallbacks : public NimBLEClientCallbacks
       // Zuerst die Steuerung stillsetzen: ohne das bliebe eine gehaltene
       // Richtung stehen und die Maschine fuehre nach dem Abriss weiter.
       clearControlState(session->type);
-      // Die Characteristics gehoeren dem Client, der sich gleich selbst
-      // loescht. Nur die Zeiger fallen lassen, nichts freigeben.
-      session->commandCharacteristic   = nullptr;
-      session->vibrationCharacteristic = nullptr;
-      session->isInUse                 = false;
+      releaseSession(*session);
     }
     NimBLEDevice::getScan()->start(0, false, true);
   }
@@ -1237,14 +1054,7 @@ static void printHelp()
 
 static void resetAllTrackers()
 {
-  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
-  {
-    if (controllerSessions[i].isInUse)
-    {
-      resetReportTracker(controllerSessions[i].specificReportTracker);
-      resetReportTracker(controllerSessions[i].commonReportTracker);
-    }
-  }
+  resetAllSessionTrackers();
   Serial.println("[BASE]  Zurueckgesetzt. Controller ruhig liegen lassen bis 'Referenz gesetzt'");
   Serial.println("[BASE]  - in dieser Phase wird auch die Stick-Mitte neu vermessen.");
 }
