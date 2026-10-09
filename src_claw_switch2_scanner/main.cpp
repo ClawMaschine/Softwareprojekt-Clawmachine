@@ -14,6 +14,7 @@
 #include "firmware_config.h"
 #include "switch2_pairing.h"
 #include "switch2_controller_types.h"
+#include "switch2_report_parser.h"
 #include "switch2_protocol.h"
 
 // ============================================================================
@@ -66,63 +67,7 @@
 //   h = Hilfe
 // ============================================================================
 
-// --- Steuerbelegung beider Joy-Cons -----------------------------------------
-//
-// Beide Controller nutzen DIESELBEN Bitmasken - Nintendo hat die Tasten
-// identisch angeordnet. Das ist an beiden Geraeten gemessen:
-//
-//   Maske   linker Joy-Con        rechter Joy-Con        Lage am Geraet
-//   0x01    Steuerkreuz Unten     B                      unten
-//   0x02    Steuerkreuz Rechts    A                      rechts
-//   0x04    Steuerkreuz Links     Y                      links
-//   0x08    Steuerkreuz Oben      X                      oben
-//   0x10    L                     R                      obere Schulter
-//   0x20    ZL                    ZR                     hintere Schulter
-//
-// Deshalb genuegt eine Zuordnungsfunktion fuer beide Seiten.
-
-static constexpr uint8_t JOYCON_BUTTON_BYTE          = 0x02;
-static constexpr uint8_t JOYCON_MASK_DIRECTION_DOWN  = 0x01;
-static constexpr uint8_t JOYCON_MASK_DIRECTION_RIGHT = 0x02;
-static constexpr uint8_t JOYCON_MASK_DIRECTION_LEFT  = 0x04;
-static constexpr uint8_t JOYCON_MASK_DIRECTION_UP    = 0x08;
-static constexpr uint8_t JOYCON_MASK_SHOULDER_UPPER  = 0x10;  // L bzw. R
-static constexpr uint8_t JOYCON_MASK_SHOULDER_LOWER  = 0x20;  // ZL bzw. ZR
-
-// Ab welcher Auslenkung der Stick als Richtung gilt. Darunter passiert nichts.
-static constexpr int8_t JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT = 30;
-
 static constexpr const char *JOYCON_CONTROL_TOPIC = "clawmachine/player_input/joycon";
-
-// Feldnamen und Bedeutung sind bewusst identisch zu PanelInput, damit der
-// Python-Server dieselbe Auswertung nutzen kann (siehe on_control_command in
-// python_server/clawmachine/claw_machine.py).
-struct JoyConControlState
-{
-  bool upButton    = false;
-  bool downButton  = false;
-  bool leftButton  = false;
-  bool rightButton = false;
-  bool frontButton = false;
-  bool backButton  = false;
-
-  // Gegensaetzliche Richtungen derselben Achse gleichzeitig ergeben keinen
-  // sinnvollen Motorbefehl. Spiegelt PanelInput::isValid().
-  bool isValid() const
-  {
-    if (leftButton && rightButton) return false;
-    if (frontButton && backButton) return false;
-    if (upButton && downButton)    return false;
-    return true;
-  }
-
-  bool equals(const JoyConControlState &other) const
-  {
-    return upButton == other.upButton && downButton == other.downButton &&
-           leftButton == other.leftButton && rightButton == other.rightButton &&
-           frontButton == other.frontButton && backButton == other.backButton;
-  }
-};
 
 ClawMqttConnection mqttConnection(
     CLAW_CLIENT_WIFI_SSID,
@@ -207,28 +152,9 @@ static bool shouldPrintButtonNames  = true;
 static constexpr uint16_t NOISE_LEARNING_SAMPLE_COUNT  = 100;
 static constexpr uint8_t  NOISE_CHANGE_PERCENT_THRESHOLD = 25;
 
-// Stick-Auswertung. Die Vollauslenkung ist aus eigenen Messungen abgeleitet:
-// gemessen wurden 1176 (rechts), 1196 (links), 1244 (oben), 1155 (unten)
-// Zaehlwerte ab Ruhelage. 1150 liegt knapp darunter, damit jede Richtung
-// sicher 100 % erreicht; darueber wird begrenzt.
-static constexpr int16_t STICK_FULL_DEFLECTION_COUNTS = 1150;
-static constexpr int8_t  STICK_DEADZONE_PERCENT       = 10;
-static constexpr int8_t  STICK_PRINT_STEP_PERCENT     = 5;
-
-struct StickPosition
-{
-  uint16_t x;
-  uint16_t y;
-};
-
-// Vorzeichenbehaftete Auslenkung in Prozent. Positiv = rechts bzw. oben.
-// Die Achsenrichtung ist am Geraet gemessen: steigendes X = rechts,
-// steigendes Y = oben.
-struct StickDeflection
-{
-  int8_t horizontalPercent;
-  int8_t verticalPercent;
-};
+// Drosselung der [STICK]-Ausgabe: erst ab dieser Aenderung in Prozent wird
+// eine neue Zeile erzeugt.
+static constexpr int8_t STICK_PRINT_STEP_PERCENT = 5;
 
 struct ReportTracker
 {
@@ -280,6 +206,18 @@ static void resetReportTracker(ReportTracker &tracker)
   tracker.receivedReportCount    = 0;
   memset(tracker.byteChangeCount, 0, sizeof(tracker.byteChangeCount));
   memset(tracker.isNoisyByte, 0, sizeof(tracker.isNoisyByte));
+}
+
+// Der Parser soll den Tracker nicht kennen muessen. Deshalb wird die
+// Kalibrierung des ersten Sticks hier zusammengestellt und als Wert
+// uebergeben - der Parser bleibt damit ohne Abhaengigkeit nach oben.
+static StickCalibration trackerStickCalibration(const ReportTracker &tracker)
+{
+  StickCalibration stick;
+  stick.offset    = tracker.firstStickOffset;
+  stick.center    = tracker.stickCenter;
+  stick.hasCenter = tracker.hasStickCenter;
+  return stick;
 }
 
 // --- Verbindungsverwaltung --------------------------------------------------
@@ -750,16 +688,6 @@ static void printHexBytes(const uint8_t *bytes, size_t length)
   }
 }
 
-// Sticks sind als zwei 12-Bit-Werte in drei Bytes gepackt, Ruhelage 0x800.
-// Gleiches Schema wie bei den Switch-1-Joy-Cons.
-static StickPosition unpackPackedStickValues(const uint8_t *bytes)
-{
-  StickPosition stick;
-  stick.x = static_cast<uint16_t>(bytes[0] | ((bytes[1] & 0x0F) << 8));
-  stick.y = static_cast<uint16_t>((bytes[1] >> 4) | (bytes[2] << 4));
-  return stick;
-}
-
 // Die drei Bytes eines Sticks gehoeren nicht in die Diff-Ausgabe: sie werden
 // separat als [STICK] dekodiert. Der Rauschfilter allein reicht dafuer nicht,
 // weil das dritte Byte (obere Y-Bits) im Ruhezustand stabil bleibt und sich
@@ -768,39 +696,17 @@ static bool isPartOfKnownStickField(const ReportTracker &tracker, size_t byteInd
 {
   if (tracker.firstStickOffset != NO_STICK_OFFSET &&
       byteIndex >= tracker.firstStickOffset &&
-      byteIndex < static_cast<size_t>(tracker.firstStickOffset) + 3)
+      byteIndex < static_cast<size_t>(tracker.firstStickOffset) + STICK_PACKED_BYTE_COUNT)
   {
     return true;
   }
   if (tracker.secondStickOffset != NO_STICK_OFFSET &&
       byteIndex >= tracker.secondStickOffset &&
-      byteIndex < static_cast<size_t>(tracker.secondStickOffset) + 3)
+      byteIndex < static_cast<size_t>(tracker.secondStickOffset) + STICK_PACKED_BYTE_COUNT)
   {
     return true;
   }
   return false;
-}
-
-// Rohwert einer Achse in vorzeichenbehaftete Prozent umrechnen, begrenzt auf
-// -100..+100. Positiv = rechts bzw. oben.
-static int8_t convertAxisToPercent(uint16_t rawValue, uint16_t centerValue)
-{
-  const int32_t deflection = static_cast<int32_t>(rawValue) - static_cast<int32_t>(centerValue);
-  int32_t percent = (deflection * 100) / STICK_FULL_DEFLECTION_COUNTS;
-  if (percent > 100)
-  {
-    percent = 100;
-  }
-  if (percent < -100)
-  {
-    percent = -100;
-  }
-  return static_cast<int8_t>(percent);
-}
-
-static bool isInsideDeadzone(int8_t percent)
-{
-  return percent > -STICK_DEADZONE_PERCENT && percent < STICK_DEADZONE_PERCENT;
 }
 
 static void printLearnedNoiseBytes(const ReportTracker &tracker)
@@ -831,21 +737,16 @@ static void printLearnedNoiseBytes(const ReportTracker &tracker)
 // wird bewusst gar nichts ausgegeben.
 static void printStickDeflection(ReportTracker &tracker, const uint8_t *report, size_t length)
 {
-  if (!shouldPrintStickValues || tracker.firstStickOffset == NO_STICK_OFFSET ||
-      !tracker.hasStickCenter)
+  if (!shouldPrintStickValues)
   {
     return;
   }
-  if (static_cast<size_t>(tracker.firstStickOffset) + 3 > length)
-  {
-    return;
-  }
-
-  const StickPosition raw = unpackPackedStickValues(&report[tracker.firstStickOffset]);
 
   StickDeflection deflection;
-  deflection.horizontalPercent = convertAxisToPercent(raw.x, tracker.stickCenter.x);
-  deflection.verticalPercent   = convertAxisToPercent(raw.y, tracker.stickCenter.y);
+  if (!readStickDeflection(report, length, trackerStickCalibration(tracker), deflection))
+  {
+    return;  // kein Stick bekannt, noch nicht kalibriert, oder Report zu kurz
+  }
 
   const bool isHorizontalIdle = isInsideDeadzone(deflection.horizontalPercent);
   const bool isVerticalIdle   = isInsideDeadzone(deflection.verticalPercent);
@@ -890,66 +791,6 @@ static void printStickDeflection(ReportTracker &tracker, const uint8_t *report, 
 
   tracker.lastPrintedDeflection = deflection;
   tracker.hasPrintedDeflection  = true;
-}
-
-// Tasten und Stick eines Joy-Con in Steuerbefehle uebersetzen. Der Stick wirkt
-// wie ein zusaetzliches Steuerkreuz: ab der Schwelle gilt seine Richtung als
-// gedrueckt, damit er ohne Aenderung in das an/aus-Format des Panels passt.
-//
-// Waagerecht stimmen Tastenname und Bewegung ueberein: links am Controller
-// bewegt den Greifer nach links. Die senkrechte Achse ist dagegen bewusst
-// gespiegelt, Richtung oben bewegt den Greifer nach hinten. Stick und Tasten
-// folgen derselben Konvention, damit sich beides gleich anfuehlt.
-static JoyConControlState readControlStateFromReport(const ReportTracker &tracker,
-                                                     const uint8_t       *report,
-                                                     size_t               length)
-{
-  JoyConControlState state;
-  if (length <= JOYCON_BUTTON_BYTE)
-  {
-    return state;
-  }
-
-  const uint8_t buttons = report[JOYCON_BUTTON_BYTE];
-
-  state.leftButton  = (buttons & JOYCON_MASK_DIRECTION_LEFT) != 0;
-  state.rightButton = (buttons & JOYCON_MASK_DIRECTION_RIGHT) != 0;
-  state.frontButton = (buttons & JOYCON_MASK_DIRECTION_DOWN) != 0;
-  state.backButton  = (buttons & JOYCON_MASK_DIRECTION_UP) != 0;
-  state.upButton    = (buttons & JOYCON_MASK_SHOULDER_UPPER) != 0;
-  state.downButton  = (buttons & JOYCON_MASK_SHOULDER_LOWER) != 0;
-
-  const bool canReadStick = tracker.hasStickCenter &&
-                            tracker.firstStickOffset != NO_STICK_OFFSET &&
-                            static_cast<size_t>(tracker.firstStickOffset) + 3 <= length;
-  if (!canReadStick)
-  {
-    return state;
-  }
-
-  const StickPosition raw = unpackPackedStickValues(&report[tracker.firstStickOffset]);
-  const int8_t horizontalPercent = convertAxisToPercent(raw.x, tracker.stickCenter.x);
-  const int8_t verticalPercent   = convertAxisToPercent(raw.y, tracker.stickCenter.y);
-
-  if (horizontalPercent >= JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
-  {
-    state.rightButton = true;  // Stick nach rechts
-  }
-  else if (horizontalPercent <= -JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
-  {
-    state.leftButton = true;   // Stick nach links
-  }
-
-  if (verticalPercent >= JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
-  {
-    state.backButton = true;   // Stick nach oben
-  }
-  else if (verticalPercent <= -JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
-  {
-    state.frontButton = true;  // Stick nach unten
-  }
-
-  return state;
 }
 
 // --- Kernstueck: Report vergleichen und Aenderungen ausgeben ----------------
@@ -1012,7 +853,8 @@ static void handleIncomingReport(ReportTracker &tracker, const uint8_t *report, 
     // Dieselben Stichproben liefern die Stick-Mittellage. Der Controller liegt
     // in dieser Phase ruhig, also ist der Mittelwert genau die Ruhelage.
     if (tracker.firstStickOffset != NO_STICK_OFFSET &&
-        static_cast<size_t>(tracker.firstStickOffset) + 3 <= usableLength)
+        static_cast<size_t>(tracker.firstStickOffset) + STICK_PACKED_BYTE_COUNT <=
+            usableLength)
     {
       const StickPosition raw = unpackPackedStickValues(&report[tracker.firstStickOffset]);
       tracker.stickCenterSumX += raw.x;
@@ -1112,7 +954,8 @@ static void handleIncomingReport(ReportTracker &tracker, const uint8_t *report, 
   // hinterlegt; publiziert wird im loop(), weil PubSubClient nicht threadsicher
   // ist und dieser Callback im NimBLE-Host-Task laeuft.
   storeControlState(tracker.controllerType,
-                    readControlStateFromReport(tracker, report, usableLength));
+                    readControlStateFromReport(report, usableLength,
+                                               trackerStickCalibration(tracker)));
 
   memcpy(tracker.previousReport, report, usableLength);
   tracker.previousReportLength = usableLength;
