@@ -3,9 +3,7 @@
 
 #include <string.h>
 
-#include "claw_mqtt_connection.h"
-#include "firmware_config.h"
-
+#include "joycon_control_output.h"
 #include "switch2_command_channel.h"
 #include "switch2_controller_types.h"
 #include "switch2_hex_output.h"
@@ -64,66 +62,6 @@
 //   p = Pairing-Handshake starten (siehe switch2_pairing.h)
 //   h = Hilfe
 // ============================================================================
-
-static constexpr const char *JOYCON_CONTROL_TOPIC = "clawmachine/player_input/joycon";
-
-ClawMqttConnection mqttConnection(
-    CLAW_CLIENT_WIFI_SSID,
-    CLAW_CLIENT_WIFI_PASSWORD,
-    CLAW_MQTT_BROKER_HOST,
-    CLAW_MQTT_BROKER_PORT,
-    "claw_switch2_scanner",
-    CLAW_MQTT_USER_USERNAME,
-    CLAW_MQTT_USER_PASSWORD,
-    CLAW_CONNECTION_RETRY_INTERVAL_MS);
-
-// Der Report-Callback laeuft im NimBLE-Host-Task, maintainConnection() im
-// Arduino-Task. PubSubClient ist nicht threadsicher, deshalb wird im Callback
-// nur der Zustand hinterlegt und im loop() publiziert - dasselbe Muster wie
-// bei pendingConnectAddress.
-//
-// Je Controller ein eigener Zustand, damit beide zusammengefuehrt werden
-// koennen: gleichzeitiges Druecken links und rechts ergibt einen gemeinsamen
-// Befehl, statt dass sich beide gegenseitig ueberschreiben.
-static JoyConControlState leftControlState;
-static JoyConControlState rightControlState;
-static volatile bool      hasPendingControlState = false;
-
-static void storeControlState(Switch2ControllerType type, const JoyConControlState &state)
-{
-  if (type == Switch2ControllerType::JoyConLeft)
-  {
-    leftControlState = state;
-  }
-  else if (type == Switch2ControllerType::JoyConRight)
-  {
-    rightControlState = state;
-  }
-  else
-  {
-    return;
-  }
-  hasPendingControlState = true;
-}
-
-// Bei Verbindungsverlust muss der Zustand geloescht werden. Sonst bliebe eine
-// gehaltene Richtung stehen und die Maschine fuehre weiter.
-static void clearControlState(Switch2ControllerType type)
-{
-  if (type == Switch2ControllerType::JoyConLeft)
-  {
-    leftControlState = JoyConControlState();
-  }
-  else if (type == Switch2ControllerType::JoyConRight)
-  {
-    rightControlState = JoyConControlState();
-  }
-  else
-  {
-    return;
-  }
-  hasPendingControlState = true;
-}
 
 // --- Rueckfallebene: gemeinsamer Report 0x05 --------------------------------
 
@@ -283,57 +221,6 @@ static void handleIncomingReport(ReportTracker &tracker, const uint8_t *report, 
                                                trackerStickCalibration(tracker)));
 
   rememberReport(tracker, report, usableLength);
-}
-
-// --- Steuerbefehle an den Python-Server -------------------------------------
-
-static void publishPendingControlState()
-{
-  if (!hasPendingControlState)
-  {
-    return;
-  }
-
-  hasPendingControlState = false;
-
-  // Beide Controller verodern: was auf einer der beiden Seiten gedrueckt ist,
-  // gilt. So funktioniert gleichzeitiges Bedienen sinnvoll.
-  JoyConControlState state;
-  state.upButton    = leftControlState.upButton    || rightControlState.upButton;
-  state.downButton  = leftControlState.downButton  || rightControlState.downButton;
-  state.leftButton  = leftControlState.leftButton  || rightControlState.leftButton;
-  state.rightButton = leftControlState.rightButton || rightControlState.rightButton;
-  state.frontButton = leftControlState.frontButton || rightControlState.frontButton;
-  state.backButton  = leftControlState.backButton  || rightControlState.backButton;
-
-  if (!state.isValid())
-  {
-    return;
-  }
-
-  // Nur bei Zustandswechsel senden. Bei rund 30 Reports pro Sekunde waere
-  // zyklisches Publizieren eine Flut - und es entlastet die Antenne, die sich
-  // WiFi und BLE teilen.
-  static JoyConControlState lastPublishedState;
-  static bool               hasPublishedOnce = false;
-
-  if (hasPublishedOnce && state.equals(lastPublishedState))
-  {
-    return;
-  }
-
-  char payload[160];
-  snprintf(payload, sizeof(payload),
-           "{\"up\":%d,\"down\":%d,\"left\":%d,\"right\":%d,\"front\":%d,\"back\":%d}",
-           state.upButton, state.downButton,
-           state.leftButton, state.rightButton,
-           state.frontButton, state.backButton);
-
-  mqttConnection.publish(JOYCON_CONTROL_TOPIC, payload);
-  Serial.printf("[MQTT]  %s -> %s\n", JOYCON_CONTROL_TOPIC, payload);
-
-  lastPublishedState = state;
-  hasPublishedOnce   = true;
 }
 
 // --- GATT-Baum ausgeben -----------------------------------------------------
@@ -917,9 +804,7 @@ void setup()
   Serial.println("=== Switch-2-Controller Rohsignal-Scanner ===");
   printHelp();
 
-  Serial.printf("[MQTT]  Broker %s:%d, Topic %s\n",
-                CLAW_MQTT_BROKER_HOST, CLAW_MQTT_BROKER_PORT, JOYCON_CONTROL_TOPIC);
-  mqttConnection.begin();
+  beginControlOutput();
 
   NimBLEDevice::init("");
   // Ohne die eigene Adresse laesst sich nicht beurteilen, ob ein
@@ -944,7 +829,7 @@ void setup()
 void loop()
 {
   handleSerialCommands();
-  mqttConnection.maintainConnection();
+  maintainControlOutput();
   publishPendingControlState();
   sendPendingVibration();
   advancePairingSessions();
