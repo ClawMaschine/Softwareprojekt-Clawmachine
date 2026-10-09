@@ -1,6 +1,8 @@
 from dataclasses import dataclass
+from http import client
 import json
 import time
+from tkinter import END
 from typing import Optional
 
 try:
@@ -13,6 +15,7 @@ except ModuleNotFoundError:
     from mqtt import MQTTClient
     from device_registry import DeviceRegistry
     from esp_device import EspDevice
+    from moving import Moving
 
 
 CLAWMACHINE_TOPIC_PREFIX = "clawmachine/"
@@ -53,6 +56,7 @@ PLAYER_INPUT_PANEL_TOPIC = "clawmachine/player_input/panel"
 PLAYER_INPUT_JOYCON_TOPIC = "clawmachine/player_input/joycon"
 PLAYER_INPUT_TOPICS = (PLAYER_INPUT_PANEL_TOPIC, PLAYER_INPUT_JOYCON_TOPIC)
 WEBINTERFACE_COMMAND_TOPIC = "clawmachine/web_interface/command"
+ENDSTOP_TOPIC = "clawmachine/endstop/state"
 PANEL_MOTOR_SPEED = 130
 
 
@@ -79,6 +83,7 @@ class ClawMachine:
             password=mqtt_configuration.password,
         )
         self.mqtt_client.connect()
+        self.move_controller = Moving(self.mqtt_client)
 
 
         # Der Player-Input-Controller schickt beim Panel nur noch die Tasten,
@@ -105,6 +110,7 @@ class ClawMachine:
         mqtt_network_client.subscribe(PLAYER_INPUT_JOYCON_TOPIC)
         mqtt_network_client.subscribe(WEBINTERFACE_COMMAND_TOPIC)
         mqtt_network_client.subscribe(DEVICE_LIST_REQUEST_TOPIC)
+        mqtt_network_client.subscribe(ENDSTOP_TOPIC)
         mqtt_network_client.on_message = self.on_message
 
     def ensure_device_registered(self, esp_name: str) -> Optional[EspDevice]:
@@ -145,9 +151,18 @@ class ClawMachine:
         # Treffer gewinnt, kein Fallthrough — der abschließende `case _` ist
         # der Default für alles, was zu keinem bekannten Topic passt.
         match topic:
+            case _ if topic == ENDSTOP_TOPIC:
+                if payload_text not in ("X:0", "X:1", "Y:0", "Y:1"):
+                    print(f"Invalid endstop state received: {payload_text}")
+                    return
+                # Endstop-Status vom Motor-Controller (z.B. "X:1", "Y:0") — direkt an das Webinterface weiterleiten
+                self.mqtt_client.publish(f"clawmachine/web_interface/endstop", payload_text)
+            
+            
             case _ if topic in PLAYER_INPUT_TOPICS or topic == WEBINTERFACE_COMMAND_TOPIC:
                 self.on_control_command(topic, payload_text)
-
+                
+                
             # Webinterface fragt aktiv nach der aktuellen Geräteliste
             case _ if topic == DEVICE_LIST_REQUEST_TOPIC:
                 self.publish_device_list()
@@ -156,6 +171,7 @@ class ClawMachine:
             case _ if topic == self.control_topic and payload_text.startswith(
                 MOTOR_COMMAND_PREFIXES
             ):
+                
                 self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
 
             # 1) Heartbeat/Laufzeit eines Geräts (clawmachine/<name>/metadata/uptime) —
