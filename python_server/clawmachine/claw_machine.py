@@ -10,12 +10,14 @@ try:
     from python_server.clawmachine.device_registry import DeviceRegistry
     from python_server.clawmachine.esp_device import EspDevice
     from python_server.clawmachine.moving import Moving
+    from python_server.clawmachine.web_interface_presence import WebInterfacePresence
 except ModuleNotFoundError:
     from configuration_loader import load_mqtt_configuration
     from mqtt import MQTTClient
     from device_registry import DeviceRegistry
     from esp_device import EspDevice
     from moving import Moving
+    from web_interface_presence import WebInterfacePresence
 
 
 CLAWMACHINE_TOPIC_PREFIX = "clawmachine/"
@@ -56,6 +58,11 @@ PLAYER_INPUT_PANEL_TOPIC = "clawmachine/player_input/panel"
 PLAYER_INPUT_JOYCON_TOPIC = "clawmachine/player_input/joycon"
 PLAYER_INPUT_TOPICS = (PLAYER_INPUT_PANEL_TOPIC, PLAYER_INPUT_JOYCON_TOPIC)
 WEBINTERFACE_COMMAND_TOPIC = "clawmachine/web_interface/command"
+# Name, unter dem sich jeder Webinterface-Browser-Tab per LWT an-/abmeldet
+# (siehe STATUS_TOPIC in frontend/src/app/services/mqtt.service.ts). Kein
+# ESP32 — wird deshalb bewusst nicht in der DeviceRegistry registriert,
+# siehe WebInterfacePresence.
+WEB_INTERFACE_DEVICE_NAME = "claw_web_interface"
 ENDSTOP_TOPIC = "clawmachine/endstop/state"
 PANEL_MOTOR_SPEED = 130
 
@@ -84,6 +91,7 @@ class ClawMachine:
         )
         self.mqtt_client.connect()
         self.move_controller = Moving(self.mqtt_client)
+        self.web_interface_presence = WebInterfacePresence()
 
 
         # Der Player-Input-Controller schickt beim Panel nur noch die Tasten,
@@ -150,10 +158,13 @@ class ClawMachine:
         payload_text = message.payload.decode("utf-8", errors="replace").strip()
         print(f"Received message on topic '{topic}': {payload_text}")
 
+        def is_topic(suffix: str) -> bool:
+            return topic.startswith(CLAWMACHINE_TOPIC_PREFIX) and topic.endswith(suffix)
+
         # switch/case über die Topic-Art. `case _ if ...` prüft "passt das Topic
-        # zu mir?" (per Walrus gleich mit dem extrahierten Wert), der erste
-        # Treffer gewinnt, kein Fallthrough — der abschließende `case _` ist
-        # der Default für alles, was zu keinem bekannten Topic passt.
+        # zu mir?", der erste Treffer gewinnt, kein Fallthrough — der
+        # abschließende `case _` ist der Default für alles, was zu keinem
+        # bekannten Topic passt.
         match topic:
             case _ if topic == ENDSTOP_TOPIC:
                 # Rohstatus vom Endstop-Board, z.B. {"x1":0,"x2":0,"y1":0,"y2":0,"z1":0}.
@@ -172,7 +183,6 @@ class ClawMachine:
             case _ if topic in PLAYER_INPUT_TOPICS or topic == WEBINTERFACE_COMMAND_TOPIC:
                 self.on_control_command(topic, payload_text)
                 
-                
             # Webinterface fragt aktiv nach der aktuellen Geräteliste
             case _ if topic == DEVICE_LIST_REQUEST_TOPIC:
                 self.publish_device_list()
@@ -181,27 +191,37 @@ class ClawMachine:
             case _ if topic == self.control_topic and payload_text.startswith(
                 MOTOR_COMMAND_PREFIXES
             ):
-                
-                self.movecontroller.move(payload_text)
-                # self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
+                axis, _, value = payload_text.partition(":")
+                if axis == "claw":
+                    self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text)
+                else:
+                    try:
+                        speed = int(value)
+                    except ValueError:
+                        print(f"Invalid motor command: {payload_text}")
+                        return
+                    self.move_controller.move_axis(axis, speed)
             # 1) Heartbeat/Laufzeit eines Geräts (clawmachine/<name>/metadata/uptime) —
             #    taucht ein Gerätename hier zum ersten Mal auf, wird er automatisch
             #    registriert (siehe ensure_device_registered)
-            case _ if (
-                esp_name := extract_esp_name_from_topic(topic, METADATA_UPTIME_TOPIC_SUFFIX)
-            ) is not None:
+            case _ if is_topic(METADATA_UPTIME_TOPIC_SUFFIX):
+                esp_name = extract_esp_name_from_topic(topic, METADATA_UPTIME_TOPIC_SUFFIX)
                 device = self.ensure_device_registered(esp_name)
                 if device is not None:
                     device.metadata.uptime_milliseconds = int(payload_text)
 
             # 2) Online/Offline-Status eines Geräts, meist über LWT (Last Will) gesetzt
-            #    (clawmachine/<name>/status) — registriert das Gerät ebenso automatisch
-            case _ if (
-                esp_name := extract_esp_name_from_topic(topic, DEVICE_STATUS_TOPIC_SUFFIX)
-            ) is not None:
-                device = self.ensure_device_registered(esp_name)
-                if device is not None:
-                    device.is_online = payload_text == "online"
+            #    (clawmachine/<name>/status) — registriert das Gerät ebenso automatisch.
+            #    Ausnahme: der Webinterface-Browser-Client ist keine Hardware und
+            #    soll nicht in der Geräteliste auftauchen (siehe WebInterfacePresence).
+            case _ if is_topic(DEVICE_STATUS_TOPIC_SUFFIX):
+                esp_name = extract_esp_name_from_topic(topic, DEVICE_STATUS_TOPIC_SUFFIX)
+                if esp_name == WEB_INTERFACE_DEVICE_NAME:
+                    self.web_interface_presence.set_online(payload_text == "online")
+                else:
+                    device = self.ensure_device_registered(esp_name)
+                    if device is not None:
+                        device.is_online = payload_text == "online"
                     
             # Steuertopic, aber kein bekannter Befehl
             case _ if topic == self.control_topic:
@@ -224,14 +244,12 @@ class ClawMachine:
                     x_speed = -PANEL_MOTOR_SPEED
                 else:
                     x_speed = 0
-
                 if self.panel_button_state.get("back"):
                     y_speed = PANEL_MOTOR_SPEED
                 elif self.panel_button_state.get("front"):
                     y_speed = -PANEL_MOTOR_SPEED
                 else:
                     y_speed = 0
-                    
                 if self.panel_button_state.get("up"):
                     z_speed = PANEL_MOTOR_SPEED
                 elif self.panel_button_state.get("down"):
