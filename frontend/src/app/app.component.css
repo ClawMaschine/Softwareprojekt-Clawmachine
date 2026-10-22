@@ -315,6 +315,15 @@
   cursor: not-allowed;
 }
 
+/* ── Eingabequellen ── */
+
+.input-sources-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 24px;
+}
+
 /* ── Device Grid ── */
 
 .device-grid {

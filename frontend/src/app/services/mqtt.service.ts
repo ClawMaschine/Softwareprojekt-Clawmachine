@@ -19,6 +19,23 @@ export interface MessageLog {
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
+// Rohstatus vom Endstop-Board, vom Server unverändert durchgereicht (siehe
+// WEB_INTERFACE_ENDSTOP_TOPIC in claw_machine.py). *2-Endstops (x2/y2) sind
+// Teil des Payloads, werden aber aktuell nirgends in der UI ausgewertet.
+export interface EndstopState {
+  x1: boolean;
+  x2: boolean;
+  y1: boolean;
+  y2: boolean;
+  z1: boolean;
+}
+
+const EMPTY_ENDSTOP_STATE: EndstopState = { x1: false, x2: false, y1: false, y2: false, z1: false };
+
+// Name -> "darf diese Eingabequelle aktuell Befehle durchreichen?" (siehe
+// InputSourceControl in claw_machine.py). Aktuell "panel" und "joycon".
+export type InputSourcesState = Record<string, boolean>;
+
 const CLAWMACHINE_TOPIC_PREFIX = 'clawmachine/';
 
 // Haupt-Steuertopic des Servers — Befehle mit X:/Y:/Z:/claw:-Präfix werden
@@ -34,11 +51,31 @@ const DEVICE_LIST_REQUEST_TOPIC = 'clawmachine/web_interface/devices/request';
 const DEVICE_LIST_TOPIC = 'clawmachine/web_interface/devices';
 const DEVICE_LIST_REFRESH_INTERVAL_MS = 5000;
 
+// Endstop-Rohstatus, vom Server bei jeder Änderung ungefragt gepusht (kein
+// Request/Response wie bei der Geräteliste nötig).
+const ENDSTOP_TOPIC = 'clawmachine/web_interface/endstop';
+
+// Welche Eingabequellen (Panel/Joy-Con) aktuell durchgereicht werden dürfen —
+// gleiches Anfrage/Antwort-Prinzip wie die Geräteliste, plus ein eigenes
+// Set-Topic zum Sperren/Entsperren einer Quelle.
+const INPUT_SOURCES_REQUEST_TOPIC = 'clawmachine/web_interface/input_sources/request';
+const INPUT_SOURCES_TOPIC = 'clawmachine/web_interface/input_sources';
+const INPUT_SOURCES_SET_TOPIC = 'clawmachine/web_interface/input_sources/set';
+
 // Wie bei den ESP-Boards: eigenes Status-Topic mit Last-Will (siehe
-// ClawMqttConnection::ensureMqttConnected in claw_mqtt_connection.cpp) —
-// das Webinterface soll sich genau wie jedes andere Gerät als eigenes Gerät
-// mit Online/Offline-Status im Dashboard zeigen, nicht nur Befehle senden.
-const STATUS_TOPIC = 'clawmachine/claw_web_interface/status';
+// ClawMqttConnection::ensureMqttConnected in claw_mqtt_connection.cpp).
+// Der Name bekommt pro Tab eine zufällige vierstellige ID angehängt (siehe
+// webInterfaceId weiter unten), da sich sonst mehrere gleichzeitig offene
+// Tabs denselben Status-Topic teilen und sich gegenseitig überschreiben
+// würden. Der Server erkennt das Präfix und registriert es bewusst NICHT
+// als Gerät (siehe WEB_INTERFACE_DEVICE_PREFIX/WebInterfacePresence in
+// claw_machine.py) — taucht also nicht in der Geräteliste auf.
+const WEB_INTERFACE_STATUS_TOPIC_PREFIX = 'clawmachine/claw_web_interface_';
+const WEB_INTERFACE_STATUS_TOPIC_SUFFIX = '/status';
+
+function generateFourDigitId(): string {
+  return Math.floor(1000 + Math.random() * 9000).toString();
+}
 
 const MAX_LOG_ENTRIES_PER_DEVICE = 30;
 
@@ -75,7 +112,23 @@ export class MqttService implements OnDestroy {
   // verdrahteter Logs für einzelne Gerätenamen.
   readonly deviceLogs$ = new BehaviorSubject<Record<string, MessageLog[]>>({});
 
+  // Letzter bekannter Endstop-Rohstatus — startet "alles nicht ausgelöst",
+  // bis die erste echte Nachricht vom Server ankommt.
+  readonly endstopState$ = new BehaviorSubject<EndstopState>(EMPTY_ENDSTOP_STATE);
+
+  // Startet leer wie devices$ — welche Quellen es gibt und ob sie erlaubt
+  // sind, kommt ausschließlich über die Antwort auf INPUT_SOURCES_REQUEST_TOPIC.
+  readonly inputSources$ = new BehaviorSubject<InputSourcesState>({});
+
   private deviceListRefreshSubscription: Subscription | null = null;
+
+  // Einmal pro Tab/Instanz erzeugt (nicht pro connect()-Aufruf), damit die ID
+  // über Reconnects hinweg stabil bleibt und sich im Broker nachvollziehen lässt.
+  private readonly webInterfaceId = generateFourDigitId();
+
+  private get statusTopic(): string {
+    return `${WEB_INTERFACE_STATUS_TOPIC_PREFIX}${this.webInterfaceId}${WEB_INTERFACE_STATUS_TOPIC_SUFFIX}`;
+  }
 
   constructor(private ngZone: NgZone) {}
 
@@ -87,19 +140,19 @@ export class MqttService implements OnDestroy {
     this.ngZone.run(() => this.connectionStatus$.next('connecting'));
 
     this.client = mqtt.connect(brokerUrl, {
-      clientId: `clawmachine_dashboard_${Math.random().toString(16).substring(2, 8)}`,
+      clientId: `clawmachine_dashboard_${this.webInterfaceId}`,
       username: environment.mqttUsername,
       password: environment.mqttPassword,
       reconnectPeriod: 3000,
       // Last Will — bricht die Browser-Tab die Verbindung ab (Reload, Tab zu),
       // markiert der Broker uns automatisch als offline. Gleiches Prinzip wie
       // die ESP-Boards in ClawMqttConnection::ensureMqttConnected().
-      will: { topic: STATUS_TOPIC, payload: 'offline', qos: 1, retain: true },
+      will: { topic: this.statusTopic, payload: 'offline', qos: 1, retain: true },
     });
 
     this.client.on('connect', () => {
       this.ngZone.run(() => this.connectionStatus$.next('connected'));
-      this.client!.publish(STATUS_TOPIC, 'online', { retain: true });
+      this.client!.publish(this.statusTopic, 'online', { retain: true });
       // Ein einziges Wildcard-Subscribe für den gesamten Namensraum statt
       // einzelner Subscribes pro bekanntem Gerätenamen — welche Geräte
       // tatsächlich existieren, wird rein aus den eingehenden Topics und der
@@ -111,6 +164,10 @@ export class MqttService implements OnDestroy {
       this.deviceListRefreshSubscription = interval(DEVICE_LIST_REFRESH_INTERVAL_MS).subscribe(
         () => this.requestDeviceList(),
       );
+
+      // Einmalig anfragen reicht — Änderungen werden danach vom Server
+      // ungefragt gepusht (siehe publish_input_sources() in claw_machine.py).
+      this.requestInputSources();
     });
 
     this.client.on('message', (topic: string, payload: Buffer) => {
@@ -134,7 +191,7 @@ export class MqttService implements OnDestroy {
     // Bei sauberem Trennen explizit offline melden statt nur aufs LWT zu
     // warten (das greift erst, wenn der Broker den Verbindungsabbruch
     // erkennt — bei einem bewussten "Trennen"-Klick soll das sofort sichtbar sein).
-    this.client?.publish(STATUS_TOPIC, 'offline', { retain: true });
+    this.client?.publish(this.statusTopic, 'offline', { retain: true });
     this.client?.end();
     this.client = null;
 
@@ -158,9 +215,39 @@ export class MqttService implements OnDestroy {
     this.client.publish(CONTROL_TOPIC, command);
   }
 
+  // Anfrage an den Server — die Antwort kommt asynchron über
+  // INPUT_SOURCES_TOPIC (siehe handleMessage) rein.
+  requestInputSources(): void {
+    if (!this.client || !this.client.connected) {
+      return;
+    }
+    this.client.publish(INPUT_SOURCES_REQUEST_TOPIC, '');
+  }
+
+  // Sperrt/entsperrt eine Eingabequelle — der Server bestätigt die Änderung
+  // (oder lehnt sie ab, z.B. bei unbekanntem Namen) über einen erneuten Push
+  // auf INPUT_SOURCES_TOPIC, inputSources$ wird also nicht optimistisch hier
+  // schon aktualisiert.
+  setInputSourceAllowed(name: string, isAllowed: boolean): void {
+    if (!this.client || !this.client.connected) {
+      return;
+    }
+    this.client.publish(INPUT_SOURCES_SET_TOPIC, `${name}:${isAllowed ? 'on' : 'off'}`);
+  }
+
   private handleMessage(topic: string, payload: string): void {
     if (topic === DEVICE_LIST_TOPIC) {
       this.applyDeviceList(payload);
+      return;
+    }
+
+    if (topic === ENDSTOP_TOPIC) {
+      this.applyEndstopState(payload);
+      return;
+    }
+
+    if (topic === INPUT_SOURCES_TOPIC) {
+      this.applyInputSources(payload);
       return;
     }
 
@@ -229,6 +316,32 @@ export class MqttService implements OnDestroy {
     if (Object.keys(prunedLogs).length !== Object.keys(currentLogs).length) {
       this.deviceLogs$.next(prunedLogs);
     }
+  }
+
+  private applyEndstopState(payload: string): void {
+    let raw: Partial<EndstopState>;
+    try {
+      raw = JSON.parse(payload);
+    } catch {
+      return;
+    }
+    this.endstopState$.next({
+      x1: Boolean(raw.x1),
+      x2: Boolean(raw.x2),
+      y1: Boolean(raw.y1),
+      y2: Boolean(raw.y2),
+      z1: Boolean(raw.z1),
+    });
+  }
+
+  private applyInputSources(payload: string): void {
+    let sources: InputSourcesState;
+    try {
+      sources = JSON.parse(payload);
+    } catch {
+      return;
+    }
+    this.inputSources$.next(sources);
   }
 
   // Aktualisiert nur bereits bekannte Geräte (Live-Update zwischen zwei

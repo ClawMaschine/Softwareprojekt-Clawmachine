@@ -2,14 +2,26 @@ import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subscription, interval } from 'rxjs';
-import { MqttService, ConnectionStatus, DeviceState, MessageLog } from './services/mqtt.service';
+import {
+  MqttService,
+  ConnectionStatus,
+  DeviceState,
+  MessageLog,
+  EndstopState,
+  InputSourcesState,
+} from './services/mqtt.service';
 import { DeviceCardComponent } from './components/device-card/device-card.component';
+import { EndstopIconComponent } from './components/endstop-icon/endstop-icon.component';
+import {
+  InputSourceToggleComponent,
+  InputSourceToggleEvent,
+} from './components/input-source-toggle/input-source-toggle.component';
 import { environment } from '../environments/environment';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, DeviceCardComponent],
+  imports: [CommonModule, FormsModule, DeviceCardComponent, EndstopIconComponent, InputSourceToggleComponent],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',
 })
@@ -18,6 +30,8 @@ export class AppComponent implements OnInit, OnDestroy {
   connectionStatus: ConnectionStatus = 'disconnected';
   devices: DeviceState[] = [];
   deviceLogs: Record<string, MessageLog[]> = {};
+  endstopState: EndstopState = { x1: false, x2: false, y1: false, y2: false, z1: false };
+  inputSources: InputSourcesState = {};
 
   // Gleicher Default wie PANEL_MOTOR_SPEED in claw_machine.py. Anders als die
   // Beschleunigung ist das keine Einstellung auf dem ESP, sondern wird bei
@@ -38,6 +52,8 @@ export class AppComponent implements OnInit, OnDestroy {
       this.mqttService.connectionStatus$.subscribe(s => (this.connectionStatus = s)),
       this.mqttService.devices$.subscribe(d => (this.devices = d)),
       this.mqttService.deviceLogs$.subscribe(l => (this.deviceLogs = l)),
+      this.mqttService.endstopState$.subscribe(e => (this.endstopState = e)),
+      this.mqttService.inputSources$.subscribe(s => (this.inputSources = s)),
       // Trigger change detection every second to refresh uptime displays
       interval(1000).subscribe(() => {
         this.devices = [...this.mqttService.devices$.value];
@@ -109,6 +125,10 @@ export class AppComponent implements OnInit, OnDestroy {
 
   sendAcceleration(): void {
     this.mqttService.publishCommand(`accel:${this.accelerationPercentPerSecond}`);
+  }
+
+  onToggleInputSource(event: InputSourceToggleEvent): void {
+    this.mqttService.setInputSourceAllowed(event.name, event.isAllowed);
   }
 
   timeLabel(d: Date): string {

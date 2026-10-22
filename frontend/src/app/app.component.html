@@ -50,6 +50,7 @@
   <section class="section">
     <h2 class="section-title">Steuerung <span class="topic-badge">clawmachine/web_interface/command</span></h2>
     <div class="control-panel">
+      <app-endstop-icon [state]="endstopState" />
       <div class="dpad">
         <button
           class="dpad-btn dpad-up"
@@ -121,6 +122,18 @@
           (click)="sendAcceleration()"
         >Setzen</button>
       </div>
+    </div>
+  </section>
+
+  <!-- Eingabequellen -->
+  <section class="section">
+    <h2 class="section-title">Eingabequellen <span class="topic-badge">clawmachine/web_interface/input_sources</span></h2>
+    <div class="input-sources-panel">
+      <app-input-source-toggle
+        [sources]="inputSources"
+        [disabled]="connectionStatus !== 'connected'"
+        (toggle)="onToggleInputSource($event)"
+      />
     </div>
   </section>
 

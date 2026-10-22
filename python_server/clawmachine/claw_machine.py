@@ -11,6 +11,7 @@ try:
     from python_server.clawmachine.esp_device import EspDevice
     from python_server.clawmachine.moving import Moving
     from python_server.clawmachine.web_interface_presence import WebInterfacePresence
+    from python_server.clawmachine.input_source_control import InputSourceControl
 except ModuleNotFoundError:
     from configuration_loader import load_mqtt_configuration
     from mqtt import MQTTClient
@@ -18,6 +19,7 @@ except ModuleNotFoundError:
     from esp_device import EspDevice
     from moving import Moving
     from web_interface_presence import WebInterfacePresence
+    from input_source_control import InputSourceControl
 
 
 CLAWMACHINE_TOPIC_PREFIX = "clawmachine/"
@@ -57,12 +59,27 @@ PLAYER_INPUT_PANEL_TOPIC = "clawmachine/player_input/panel"
 # grab/release, die beim Joy-Con keine Entsprechung haben.
 PLAYER_INPUT_JOYCON_TOPIC = "clawmachine/player_input/joycon"
 PLAYER_INPUT_TOPICS = (PLAYER_INPUT_PANEL_TOPIC, PLAYER_INPUT_JOYCON_TOPIC)
+# Welcher InputSourceControl-Name zu welchem Eingabe-Topic gehört — nur diese
+# beiden sind über das Webinterface sperrbar (siehe INPUT_SOURCES_SET_TOPIC).
+INPUT_SOURCE_NAME_BY_TOPIC = {
+    PLAYER_INPUT_PANEL_TOPIC: "panel",
+    PLAYER_INPUT_JOYCON_TOPIC: "joycon",
+}
+# An-/Abfrage, welche Eingabequellen aktuell durchgereicht werden dürfen —
+# gleiches Anfrage/Antwort-Prinzip wie die Geräteliste, plus ein Set-Topic,
+# über das das Webinterface einzelne Quellen sperrt/entsperrt.
+INPUT_SOURCES_REQUEST_TOPIC = "clawmachine/web_interface/input_sources/request"
+INPUT_SOURCES_TOPIC = "clawmachine/web_interface/input_sources"
+INPUT_SOURCES_SET_TOPIC = "clawmachine/web_interface/input_sources/set"
 WEBINTERFACE_COMMAND_TOPIC = "clawmachine/web_interface/command"
-# Name, unter dem sich jeder Webinterface-Browser-Tab per LWT an-/abmeldet
-# (siehe STATUS_TOPIC in frontend/src/app/services/mqtt.service.ts). Kein
-# ESP32 — wird deshalb bewusst nicht in der DeviceRegistry registriert,
-# siehe WebInterfacePresence.
-WEB_INTERFACE_DEVICE_NAME = "claw_web_interface"
+WEB_INTERFACE_ENDSTOP_TOPIC = "clawmachine/web_interface/endstop"
+# Präfix, unter dem sich jeder Webinterface-Browser-Tab per LWT an-/abmeldet —
+# gefolgt von einer pro Tab zufälligen vierstelligen ID (siehe webInterfaceId
+# in frontend/src/app/services/mqtt.service.ts), damit mehrere gleichzeitig
+# offene Tabs sich nicht denselben Status-Topic teilen. Kein ESP32 — wird
+# deshalb bewusst nicht in der DeviceRegistry registriert, siehe
+# WebInterfacePresence.
+WEB_INTERFACE_DEVICE_PREFIX = "claw_web_interface_"
 ENDSTOP_TOPIC = "clawmachine/endstop/state"
 PANEL_MOTOR_SPEED = 130
 
@@ -92,6 +109,7 @@ class ClawMachine:
         self.mqtt_client.connect()
         self.move_controller = Moving(self.mqtt_client)
         self.web_interface_presence = WebInterfacePresence()
+        self.input_source_control = InputSourceControl(INPUT_SOURCE_NAME_BY_TOPIC.values())
 
 
         # Der Player-Input-Controller schickt beim Panel nur noch die Tasten,
@@ -122,6 +140,8 @@ class ClawMachine:
         mqtt_network_client.subscribe(PLAYER_INPUT_JOYCON_TOPIC)
         mqtt_network_client.subscribe(WEBINTERFACE_COMMAND_TOPIC)
         mqtt_network_client.subscribe(DEVICE_LIST_REQUEST_TOPIC)
+        mqtt_network_client.subscribe(INPUT_SOURCES_REQUEST_TOPIC)
+        mqtt_network_client.subscribe(INPUT_SOURCES_SET_TOPIC)
         mqtt_network_client.subscribe(ENDSTOP_TOPIC)
         mqtt_network_client.on_message = self.on_message
 
@@ -145,6 +165,15 @@ class ClawMachine:
         # geschickt, nicht automatisch bei jeder Änderung der Registry.
         devices = [device.to_dict() for device in self.device_registry.devices_by_name.values()]
         self.mqtt_client.publish(DEVICE_LIST_TOPIC, json.dumps(devices))
+
+    def publish_input_sources(self):
+        # Antwort auf INPUT_SOURCES_REQUEST_TOPIC — wird zusätzlich nach
+        # jeder erfolgreichen Änderung über INPUT_SOURCES_SET_TOPIC erneut
+        # geschickt, damit alle offenen Webinterfaces sofort den neuen
+        # Stand sehen, ohne selbst erneut anfragen zu müssen.
+        self.mqtt_client.publish(
+            INPUT_SOURCES_TOPIC, json.dumps(self.input_source_control.to_dict())
+        )
 
     def on_message(self, _client, _userdata, message):
         # Callback von paho-mqtt für JEDE Nachricht auf einem abonnierten Topic
@@ -177,15 +206,31 @@ class ClawMachine:
                     print(f"Invalid endstop state received: {payload_text}")
                     return
                 self.move_controller.update_endstop_status(endstop_state)
-                self.mqtt_client.publish("clawmachine/web_interface/endstop", payload_text)
-            
-            
+                self.mqtt_client.publish(WEB_INTERFACE_ENDSTOP_TOPIC, payload_text)
+
+
             case _ if topic in PLAYER_INPUT_TOPICS or topic == WEBINTERFACE_COMMAND_TOPIC:
                 self.on_control_command(topic, payload_text)
-                
+
             # Webinterface fragt aktiv nach der aktuellen Geräteliste
             case _ if topic == DEVICE_LIST_REQUEST_TOPIC:
                 self.publish_device_list()
+
+            # Webinterface fragt aktiv nach dem aktuellen Sperr-Zustand der
+            # Eingabequellen (Panel/Joy-Con)
+            case _ if topic == INPUT_SOURCES_REQUEST_TOPIC:
+                self.publish_input_sources()
+
+            # Webinterface sperrt/entsperrt eine Eingabequelle, z.B. "panel:off"
+            case _ if topic == INPUT_SOURCES_SET_TOPIC:
+                source_name, _, value = payload_text.strip().partition(":")
+                if value not in ("on", "off"):
+                    print(f"Invalid input source command: {payload_text}")
+                    return
+                if not self.input_source_control.set_allowed(source_name, value == "on"):
+                    print(f"Unknown input source: {source_name}")
+                    return
+                self.publish_input_sources()
             # 7) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
             #    Haupt-Steuertopic — unverändert an den Motor-Controller weiterleiten
             case _ if topic == self.control_topic and payload_text.startswith(
@@ -216,8 +261,11 @@ class ClawMachine:
             #    soll nicht in der Geräteliste auftauchen (siehe WebInterfacePresence).
             case _ if is_topic(DEVICE_STATUS_TOPIC_SUFFIX):
                 esp_name = extract_esp_name_from_topic(topic, DEVICE_STATUS_TOPIC_SUFFIX)
-                if esp_name == WEB_INTERFACE_DEVICE_NAME:
-                    self.web_interface_presence.set_online(payload_text == "online")
+                if esp_name.startswith(WEB_INTERFACE_DEVICE_PREFIX):
+                    web_interface_id = esp_name[len(WEB_INTERFACE_DEVICE_PREFIX) :]
+                    self.web_interface_presence.set_online(
+                        web_interface_id, payload_text == "online"
+                    )
                 else:
                     device = self.ensure_device_registered(esp_name)
                     if device is not None:
@@ -235,6 +283,13 @@ class ClawMachine:
         
         match topic:
             case _ if topic in PLAYER_INPUT_TOPICS:
+                source_name = INPUT_SOURCE_NAME_BY_TOPIC.get(topic)
+                if source_name is not None and not self.input_source_control.is_allowed(
+                    source_name
+                ):
+                    # Quelle gesperrt (siehe INPUT_SOURCES_SET_TOPIC) — Eingabe
+                    # wird komplett ignoriert, auch fürs gemeinsame panel_button_state.
+                    return
                 panel_buttons = json.loads(payload_text)
                 self.panel_button_state.update(panel_buttons)
 

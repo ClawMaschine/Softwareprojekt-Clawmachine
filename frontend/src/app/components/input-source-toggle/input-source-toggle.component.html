@@ -1,0 +1,23 @@
+<div class="input-sources">
+  @if (rows.length === 0) {
+    <p class="empty">Noch keine Eingabequellen bekannt</p>
+  } @else {
+    @for (row of rows; track row.name) {
+      <div class="source-row">
+        <span class="source-label">{{ row.label }}</span>
+        <button
+          type="button"
+          class="toggle"
+          [class.on]="row.isAllowed"
+          [disabled]="disabled"
+          [attr.aria-pressed]="row.isAllowed"
+          [attr.aria-label]="row.label + (row.isAllowed ? ' sperren' : ' erlauben')"
+          (click)="onToggle(row.name, row.isAllowed)"
+        >
+          <span class="toggle-knob"></span>
+        </button>
+        <span class="source-state">{{ row.isAllowed ? 'erlaubt' : 'gesperrt' }}</span>
+      </div>
+    }
+  }
+</div>

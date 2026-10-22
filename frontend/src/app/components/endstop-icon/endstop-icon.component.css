@@ -1,0 +1,47 @@
+.claw-icon {
+  width: 110px;
+  height: 118px;
+  display: block;
+}
+
+.frame {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 3;
+}
+
+.rope {
+  stroke: var(--text-muted);
+  stroke-width: 2;
+  stroke-dasharray: 3 3;
+}
+
+.claw-shape {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.endstop {
+  fill: var(--bg-card-2);
+  stroke: var(--border);
+  stroke-width: 1.5;
+  transition: fill 0.2s ease, stroke 0.2s ease;
+}
+
+.endstop.triggered {
+  fill: var(--online);
+  stroke: var(--online);
+}
+
+.label {
+  font-size: 11px;
+  fill: var(--text-muted);
+  text-anchor: middle;
+}
+
+.label-start {
+  text-anchor: start;
+}

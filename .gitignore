@@ -18,7 +18,10 @@ frontend/node_modules/
 frontend/dist/
 frontend/.angular/
 managed_components/
-components/
+# Nur der ESP-IDF-Build-Artefakt-Ordner im Projekt-Root, NICHT
+# frontend/src/app/components/ — ohne führenden Slash würde das Pattern
+# jeden Ordner namens "components" in beliebiger Tiefe treffen.
+/components/
 data/deb_files/
 dependencies.lock
 sdkconfig.defaults
