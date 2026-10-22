@@ -86,9 +86,9 @@ print(mqtt_configuration.password)
 fi
 
 print_info "Setze berechtigungen für die Mosquitto-Konfigurationsdateien"
-run_as_root chmod 644 docker/mosquitto/config/passwords
-run_as_root chmod 644 docker/mosquitto/config/mosquitto.conf 
-run_as_root chmod 755 docker/mosquitto/config
+run_as_root chmod 644 "$mosquitto_passwords_path"
+run_as_root chmod 644 "$repository_root_directory/docker/mosquitto/config/mosquitto.conf"
+run_as_root chmod 755 "$repository_root_directory/docker/mosquitto/config"
 
 print_info "Setup abgeschlossen"
 printf '\nNächste Schritte:\n'
