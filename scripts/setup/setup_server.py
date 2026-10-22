@@ -155,6 +155,9 @@ def _show_planned(state: dict) -> None:
     else:
         rows.append(("[yellow]✏ [/]", "Python-Abhängigkeiten aktualisieren"))
     rows.append(("[cyan]▶ [/]", "WLAN-Hotspot einrichten (setup_hotspot.py)"))
+    mosquitto_passwords_path = _REPO_ROOT / "docker" / "mosquitto" / "config" / "passwords"
+    if not mosquitto_passwords_path.exists():
+        rows.append(("[green]➕[/]", "Mosquitto-Passwortdatei erzeugen (aus config.ini)"))
 
     t = Table(box=box.ROUNDED, border_style="yellow", title="Geplante Schritte")
     t.add_column("", width=3)
@@ -224,6 +227,66 @@ def _install_python_deps() -> None:
     _stream(["bash", str(script)], "Python-Dependencies")
 
 
+def _setup_mosquitto_password() -> None:
+    # mosquitto.conf verlangt password_file (allow_anonymous false) — ohne
+    # diese Datei kommt der Broker-Container gar nicht erst hoch (Restart-
+    # Schleife, "Unable to open pwfile"). setup_server.sh hat das schon immer
+    # gemacht, hier fehlte der Schritt bisher komplett.
+    mosquitto_config_directory = _REPO_ROOT / "docker" / "mosquitto" / "config"
+    mosquitto_passwords_path = mosquitto_config_directory / "passwords"
+
+    if mosquitto_passwords_path.exists():
+        console.print("\n  [green]✓ Mosquitto-Passwortdatei bereits vorhanden[/]")
+        return
+
+    console.print("\n  [bold dim]▸ Mosquitto-Passwortdatei erzeugen (nicht in Git, siehe .gitignore)[/]")
+
+    # Zugangsdaten aus config.ini/config.local.ini wiederverwenden statt hier
+    # erneut zu parsen — siehe python_server/configuration_loader.py.
+    credentials_result = subprocess.run(
+        [
+            sys.executable, "-c",
+            "from python_server.configuration_loader import load_mqtt_configuration\n"
+            "mqtt_configuration = load_mqtt_configuration()\n"
+            "print(mqtt_configuration.username)\n"
+            "print(mqtt_configuration.password)\n",
+        ],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    lines = credentials_result.stdout.strip().splitlines()
+    if credentials_result.returncode != 0 or len(lines) < 2:
+        console.print("  [red]✗ Konnte MQTT-Zugangsdaten nicht aus config.ini lesen[/]")
+        console.print(f"  [dim]{credentials_result.stderr.strip()}[/]")
+        return
+
+    mqtt_username, mqtt_password = lines[0], lines[1]
+
+    created = _stream(
+        [
+            "docker", "run", "--rm",
+            "-v", f"{mosquitto_config_directory}:/mosquitto/config",
+            "eclipse-mosquitto:latest",
+            "mosquitto_passwd", "-b", "-c", "/mosquitto/config/passwords",
+            mqtt_username, mqtt_password,
+        ],
+        f"Mosquitto-Passwortdatei erzeugen (Benutzer '{mqtt_username}')",
+    )
+    if not created:
+        return
+
+    for path, mode in (
+        (mosquitto_passwords_path, 0o644),
+        (mosquitto_config_directory / "mosquitto.conf", 0o644),
+        (mosquitto_config_directory, 0o755),
+    ):
+        try:
+            path.chmod(mode)
+        except OSError as error:
+            console.print(f"  [yellow]⚠ Berechtigungen für {path} konnten nicht gesetzt werden: {error}[/]")
+
+
 # ─── Hauptprogramm ────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -282,6 +345,11 @@ def main() -> None:
     console.print(Rule("[bold]6 · WLAN-Hotspot[/]", style="cyan"))
     hotspot = _SCRIPT_DIR / "setup_hotspot.py"
     subprocess.run([sys.executable, str(hotspot)])
+
+    # 9. Mosquitto-Zugangsdaten
+    console.print()
+    console.print(Rule("[bold]7 · Mosquitto-Zugangsdaten[/]", style="cyan"))
+    _setup_mosquitto_password()
 
     # Ergebnis
     console.print()
