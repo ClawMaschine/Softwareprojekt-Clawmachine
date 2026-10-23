@@ -1,4 +1,7 @@
-MOTOR_CONTROLLER_COMMAND_TOPIC = "clawmachine/motor_controller/motor/command"
+try:
+    from python_server.clawmachine.topics import MOTOR_CONTROLLER_COMMAND_TOPIC
+except ModuleNotFoundError:
+    from topics import MOTOR_CONTROLLER_COMMAND_TOPIC
 
 # Rohe Feldnamen im Endstop-JSON (siehe src_claw_server/main.cpp) auf die
 # Achsen-Buchstaben abgebildet, die hier und in claw_machine.py verwendet
