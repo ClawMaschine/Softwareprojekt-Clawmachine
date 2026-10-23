@@ -37,6 +37,12 @@ console = Console()
 _SCRIPT_DIR  = Path(__file__).parent
 _REPO_ROOT   = _SCRIPT_DIR.parent.parent
 _COMPOSE     = _REPO_ROOT / "docker" / "docker-compose.yml"
+# Lokaler, nicht eingecheckter Override (siehe docker/docker-compose.override.yml).
+# Mit explizitem -f wird er von docker compose NICHT automatisch geladen.
+_COMPOSE_OVERRIDE = _COMPOSE.with_name("docker-compose.override.yml")
+_COMPOSE_FILE_ARGS = ["-f", str(_COMPOSE)] + (
+    ["-f", str(_COMPOSE_OVERRIDE)] if _COMPOSE_OVERRIDE.exists() else []
+)
 
 # ─── Log-Level-Erkennung ─────────────────────────────────────────────────────
 # Erkennt Level aus: uvicorn, FastAPI, paho-mqtt, apt, docker
@@ -101,7 +107,7 @@ def _container_exists(name: str) -> bool:
 
 def _docker_compose_services() -> list[dict]:
     """Parst docker compose ps Ausgabe zu einer Liste von Dicts."""
-    result = _run(["docker", "compose", "-f", str(_COMPOSE), "ps"])
+    result = _run(["docker", "compose", *_COMPOSE_FILE_ARGS, "ps"])
     lines = result.stdout.strip().splitlines()
     if len(lines) < 2:
         return []
@@ -174,14 +180,14 @@ def _start_docker_services() -> bool:
 
     # Images bauen (nur wenn Dockerfile/Quellcode geändert – cached sonst)
     if not _stream(
-        ["docker", "compose", "-f", str(_COMPOSE), "build"],
+        ["docker", "compose", *_COMPOSE_FILE_ARGS, "build"],
         "Images bauen (mqtt-broker, captive-dns, frontend, server)",
     ):
         return False
 
     # Alle Services starten
     if not _stream(
-        ["docker", "compose", "-f", str(_COMPOSE), "up", "-d"],
+        ["docker", "compose", *_COMPOSE_FILE_ARGS, "up", "-d"],
         "Services starten",
     ):
         return False
@@ -202,7 +208,7 @@ def _stream_server_logs() -> None:
                   " zum Stoppen: scripts/run/stop_project.py)[/dim]\n")
 
     process = subprocess.Popen(
-        ["docker", "compose", "-f", str(_COMPOSE), "logs", "-f", "--tail", "50", "server"],
+        ["docker", "compose", *_COMPOSE_FILE_ARGS, "logs", "-f", "--tail", "50", "server"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,

@@ -3,12 +3,20 @@
 
 #include "claw_mqtt_connection.h"
 #include "claw_motor_controller.h"
+#include "claw_ota_updater.h"
 #include "firmware_config.h"
 #include <ArduinoJson.h>
 
+static constexpr const char *MOTOR_COMMAND_TOPIC  = "clawmachine/motor_controller/motor/command";
+static constexpr const char *MOTOR_SETTINGS_TOPIC = "clawmachine/motor_controller/settings";
+static constexpr const char *ERROR_LOG_TOPIC      = "clawmachine/motor_controller/error_log";
+// PubSubClient hat standardmaessig nur 256 Byte Puffer pro Nachricht — der
+// zurueckgespiegelte Original-Payload wird deshalb gekuerzt.
+static constexpr size_t ERROR_LOG_MAX_PAYLOAD_LENGTH = 100;
+
 void onMqttMessage(char *topic, uint8_t *payload, unsigned int length);
 
-void scanI2cBus()
+void scanI2cBus() 
 {
   Serial.println("[I2C] Scanne Bus nach angeschlossenen Geraeten...");
   uint8_t foundDeviceCount = 0;
@@ -43,6 +51,35 @@ ClawMotorController movementController(
     CLAW_CLAW_SERVO_PIN,
     CLAW_MOTOR_ACCELERATION_PERCENT_PER_SECOND);
 
+ClawOtaUpdater otaUpdater(
+    motorControllerConnection,
+    CLAW_MOTOR_CONTROLLER_CLIENT_ID,
+    CLAW_MQTT_BROKER_HOST);
+
+// Hardware-Pruefung fuers OTA-Rollback: beide Motor-Shields muessen am I2C-Bus
+// antworten, sonst wird die neue Firmware verworfen.
+bool areMotorShieldsReachable()
+{
+  const uint8_t shieldAddresses[] = {CLAW_MOTOR_SHIELD_A_I2C_ADDRESS, CLAW_MOTOR_SHIELD_B_I2C_ADDRESS};
+  for (uint8_t address : shieldAddresses) {
+    Wire.beginTransmission(address);
+    if (Wire.endTransmission() != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Waehrend des Flashens duerfen keine Motoren weiterlaufen.
+void stopAllMotorsBeforeUpdate()
+{
+  movementController.move('X', 0);
+  movementController.move('Y', 0);
+  movementController.move('Z', 0);
+  movementController.update();
+  otaUpdater.maintain();
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -54,12 +91,14 @@ void setup()
   Wire.begin();
   Wire.setClock(400000); // I2C Fast Mode — PCA9685 auf dem Shield unterstuetzt das, reduziert die Zeit pro onestep()
   scanI2cBus();
-  motorControllerConnection.begin();
   movementController.begin();
   motorControllerConnection.setMessageCallback(onMqttMessage);
   motorControllerConnection.begin();
-  motorControllerConnection.subscribe("clawmachine/motor_controller/motor/command");
-  motorControllerConnection.subscribe("clawmachine/motor_controller/settings");
+  motorControllerConnection.subscribe(MOTOR_COMMAND_TOPIC);
+  motorControllerConnection.subscribe(MOTOR_SETTINGS_TOPIC);
+  otaUpdater.setBeforeUpdateCallback(stopAllMotorsBeforeUpdate);
+  otaUpdater.setHealthCheck(areMotorShieldsReachable);
+  otaUpdater.begin();
 }
 
 void loop()
@@ -68,6 +107,76 @@ void loop()
   movementController.update();
 }
 
+
+
+// Meldet einen nicht verarbeitbaren Befehl als JSON an den Server, z.B.
+// {"device":"claw_motor_controller","topic":"clawmachine/motor_controller/motor/command",
+//  "payload":"X:abc","error":"Unbekannter Motorbefehl"}
+void publishErrorLog(const char *sourceTopic, const String &payload, const String &errorDescription)
+{
+  JsonDocument jsonDoc;
+  jsonDoc["device"]  = CLAW_MOTOR_CONTROLLER_CLIENT_ID;
+  jsonDoc["topic"]   = sourceTopic;
+  jsonDoc["payload"] = payload.substring(0, ERROR_LOG_MAX_PAYLOAD_LENGTH);
+  jsonDoc["error"]   = errorDescription;
+
+  String errorJson;
+  serializeJson(jsonDoc, errorJson);
+  motorControllerConnection.publish(ERROR_LOG_TOPIC, errorJson.c_str());
+  Serial.printf("[MOTOR_CONTROLLER] error_log: %s\n", errorJson.c_str());
+}
+
+// Motorbefehl als JSON, z.B. {"X":100,"Y":0,"Z":0,"claw":"open"} — nur die
+// enthaltenen Felder werden angewendet, fehlende Achsen bleiben unveraendert.
+// Zusaetzlich wird das bisherige Textformat akzeptiert ("X:100", "claw:open"),
+// das der Python-Server aktuell sendet.
+void applyMotorCommand(const char *topic, const String &message)
+{
+  if (message.startsWith("{")) {
+    JsonDocument jsonDoc;
+    DeserializationError error = deserializeJson(jsonDoc, message);
+    if (error) {
+      publishErrorLog(topic, message, String("JSON ungueltig: ") + error.c_str());
+      return;
+    }
+
+    const char axisNames[] = {'X', 'Y', 'Z'};
+    for (char axis : axisNames) {
+      const char axisKey[2] = {axis, '\0'};
+      if (!jsonDoc[axisKey].isNull()) {
+        if (!jsonDoc[axisKey].is<int>()) {
+          publishErrorLog(topic, message, String("Wert fuer Achse ") + axis + " ist keine Zahl");
+          continue;
+        }
+        movementController.move(axis, jsonDoc[axisKey].as<int>());
+      }
+    }
+    if (!jsonDoc["claw"].isNull()) {
+      const char *clawCommand = jsonDoc["claw"].is<const char *>() ? jsonDoc["claw"].as<const char *>() : "";
+      if (!movementController.moveClaw(clawCommand)) {
+        publishErrorLog(topic, message, "Unbekannter Klauen-Befehl");
+      }
+    }
+    return;
+  }
+
+  if (message.startsWith("X:") || message.startsWith("Y:") || message.startsWith("Z:")) {
+    String speedText = message.substring(2);
+    char *speedEnd = nullptr;
+    long speed = strtol(speedText.c_str(), &speedEnd, 10);
+    if (speedText.length() == 0 || *speedEnd != '\0') {
+      publishErrorLog(topic, message, "Geschwindigkeit ist keine Zahl");
+      return;
+    }
+    movementController.move(message.charAt(0), (int)speed);
+  } else if (message.startsWith("claw:")) {
+    if (!movementController.moveClaw(message.substring(5).c_str())) {
+      publishErrorLog(topic, message, "Unbekannter Klauen-Befehl");
+    }
+  } else {
+    publishErrorLog(topic, message, "Unbekannter Motorbefehl");
+  }
+}
 
 void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
 {
@@ -81,33 +190,26 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
   Serial.print(": ");
   Serial.println(message);
 
-  if (strcmp(topic, "clawmachine/motor_controller/settings") == 0) {
+  if (otaUpdater.handleMessage(topic, message)) {
+    return;
+  }
+
+  if (strcmp(topic, MOTOR_SETTINGS_TOPIC) == 0) {
     // JSON-Settings-Update, z.B. {"accelerationPercentPerSecond": 50}
     JsonDocument jsonDoc;
     DeserializationError error = deserializeJson(jsonDoc, message);
     if (error) {
-      Serial.print("[MOTOR_CONTROLLER] Fehler beim Parsen der Settings-Nachricht: ");
-      Serial.println(error.c_str());
+      publishErrorLog(topic, message, String("JSON ungueltig: ") + error.c_str());
       return;
     }
 
-    if (!jsonDoc["accelerationPercentPerSecond"].isNull()) {
+    if (jsonDoc["accelerationPercentPerSecond"].is<float>()) {
       float newAcceleration = jsonDoc["accelerationPercentPerSecond"].as<float>();
       movementController.setAcceleration(newAcceleration);
+    } else {
+      publishErrorLog(topic, message, "accelerationPercentPerSecond fehlt oder ist keine Zahl");
     }
-  } else if (strcmp(topic, "clawmachine/motor_controller/motor/command") == 0) {
-    if (message.startsWith("X:")) {
-      int speed = message.substring(2).toInt();
-      movementController.move('X', speed);
-    } else if (message.startsWith("Y:")) {
-      int speed = message.substring(2).toInt();
-      movementController.move('Y', speed);
-    } else if (message.startsWith("Z:")) {
-      int speed = message.substring(2).toInt();
-      movementController.moveZ(speed);
-    } else if (message.startsWith("claw:")) {
-      String command = message.substring(5);
-      movementController.moveClaw(command.c_str());
-    }
+  } else if (strcmp(topic, MOTOR_COMMAND_TOPIC) == 0) {
+    applyMotorCommand(topic, message);
   }
 }

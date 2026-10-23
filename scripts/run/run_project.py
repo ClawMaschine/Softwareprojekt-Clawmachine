@@ -13,7 +13,7 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
-
+import argparse
 
 # ─── Rich ────────────────────────────────────────────────────────────────────
 
@@ -40,6 +40,12 @@ console = Console()
 _SCRIPT_DIR = Path(__file__).parent
 _REPO_ROOT = _SCRIPT_DIR.parent.parent
 _COMPOSE = _REPO_ROOT / "docker" / "docker-compose.yml"
+# Lokaler, nicht eingecheckter Override (siehe docker/docker-compose.override.yml).
+# Mit explizitem -f wird er von docker compose NICHT automatisch geladen.
+_COMPOSE_OVERRIDE = _COMPOSE.with_name("docker-compose.override.yml")
+_COMPOSE_FILE_ARGS = ["-f", str(_COMPOSE)] + (
+    ["-f", str(_COMPOSE_OVERRIDE)] if _COMPOSE_OVERRIDE.exists() else []
+)
 _TILE_HISTORY = 200
 _TILE_COLUMNS = 2
 
@@ -68,7 +74,7 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
 
 
 def _compose_services() -> list[str]:
-    result = _run(["docker", "compose", "-f", str(_COMPOSE), "config", "--services"])
+    result = _run(["docker", "compose", *_COMPOSE_FILE_ARGS, "config", "--services"])
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
@@ -83,7 +89,7 @@ class LogTile:
 
     def start(self) -> None:
         self._process = subprocess.Popen(
-            ["docker", "compose", "-f", str(_COMPOSE), "logs", "-f", "--tail", "30", self.service],
+            ["docker", "compose", *_COMPOSE_FILE_ARGS, "logs", "-f", "--tail", "30", self.service],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -133,12 +139,12 @@ def _check_prerequisites() -> bool:
 
 def _build_and_start() -> bool:
     console.print("\n  [bold dim]▸ Images bauen[/]")
-    if subprocess.run(["docker", "compose", "-f", str(_COMPOSE), "build"]).returncode != 0:
+    if subprocess.run(["docker", "compose", *_COMPOSE_FILE_ARGS, "build"]).returncode != 0:
         console.print("  [red]✗ Build fehlgeschlagen[/]")
         return False
 
     console.print("  [bold dim]▸ Services starten[/]")
-    if subprocess.run(["docker", "compose", "-f", str(_COMPOSE), "up", "-d"]).returncode != 0:
+    if subprocess.run(["docker", "compose", *_COMPOSE_FILE_ARGS, "up", "-d"]).returncode != 0:
         console.print("  [red]✗ Start fehlgeschlagen[/]")
         return False
 
@@ -187,7 +193,7 @@ def main() -> None:
         for tile in tiles.values():
             tile.stop()
         console.print("\n  [yellow]Stoppe alle Container …[/]")
-        subprocess.run(["docker", "compose", "-f", str(_COMPOSE), "down"])
+        subprocess.run(["docker", "compose", *_COMPOSE_FILE_ARGS, "down"])
         console.print("  [green]✓ Alle Container gestoppt[/]")
 
 

@@ -21,6 +21,7 @@ public:
   void setMessageCallback(void (*callback)(char *, uint8_t *, unsigned int));
   void subscribe(const char *topic);
   void publish(const char *topic, const char *payload);
+  bool isMqttConnected();
 
 private:
   bool ensureWifiConnected();

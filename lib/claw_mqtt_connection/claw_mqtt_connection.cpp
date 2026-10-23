@@ -150,6 +150,11 @@ void ClawMqttConnection::publish(const char *topic, const char *payload)
   mqttClient.publish(topic, payload);
 }
 
+bool ClawMqttConnection::isMqttConnected()
+{
+  return mqttClient.connected();
+}
+
 void ClawMqttConnection::resubscribeAll()
 {
   for (uint8_t i = 0; i < subscribedTopicCount; i++) {

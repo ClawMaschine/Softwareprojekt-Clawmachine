@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, Response
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 try:
     from python_server.camera import Camera
@@ -38,6 +40,13 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# Firmware-Binaries fuer OTA-Updates der ESP32-Boards (siehe lib/claw_ota und
+# scripts/dev/ota_update.py). Im Docker-Container wird firmware_updates/ des
+# Repos hierher gemountet.
+FIRMWARE_UPDATES_DIRECTORY = Path(__file__).parent.parent / "firmware_updates"
+FIRMWARE_UPDATES_DIRECTORY.mkdir(exist_ok=True)
+app.mount("/firmware", StaticFiles(directory=FIRMWARE_UPDATES_DIRECTORY), name="firmware")
 
 
 def generate_mjpeg_frames():

@@ -29,4 +29,8 @@ mqtt_client.publish(status_topic, "online")
 while True:
     uptime_ms = int((time.time() - started_at) * 1000)
     mqtt_client.publish(uptime_topic, str(uptime_ms))
+
+    mqtt_client.publish(
+        "clawmachine/emulated_esp/error_log", "Emulated ESP is running."
+    )
     time.sleep(1)

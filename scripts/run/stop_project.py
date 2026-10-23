@@ -31,6 +31,12 @@ console = Console()
 _SCRIPT_DIR = Path(__file__).parent
 _REPO_ROOT = _SCRIPT_DIR.parent.parent
 _COMPOSE = _REPO_ROOT / "docker" / "docker-compose.yml"
+# Lokaler, nicht eingecheckter Override (siehe docker/docker-compose.override.yml).
+# Mit explizitem -f wird er von docker compose NICHT automatisch geladen.
+_COMPOSE_OVERRIDE = _COMPOSE.with_name("docker-compose.override.yml")
+_COMPOSE_FILE_ARGS = ["-f", str(_COMPOSE)] + (
+    ["-f", str(_COMPOSE_OVERRIDE)] if _COMPOSE_OVERRIDE.exists() else []
+)
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
@@ -70,7 +76,7 @@ def main() -> None:
 
     console.print()
     console.print(Rule("[bold]Docker Services stoppen[/]", style="blue"))
-    if not _stream(["docker", "compose", "-f", str(_COMPOSE), "down"], "Services stoppen"):
+    if not _stream(["docker", "compose", *_COMPOSE_FILE_ARGS, "down"], "Services stoppen"):
         sys.exit(1)
 
     console.print()

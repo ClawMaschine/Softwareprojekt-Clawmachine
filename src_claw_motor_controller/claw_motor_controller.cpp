@@ -49,7 +49,6 @@ void ClawMotorController::begin()
   // lesen zu muessen. 0 heisst: kein Ramping, Geschwindigkeit springt sofort.
   Serial.printf("[MOTOR] Beschleunigung: %.1f %%/s\n", accelerationPercentPerSecond);
 
-  connection.subscribe(COMMAND_TOPIC);
 }
 
 void ClawMotorController::update()
@@ -61,7 +60,7 @@ void ClawMotorController::update()
 }
 
 
-void ClawMotorController::move(char axis, int speed)
+bool ClawMotorController::move(char axis, int speed)
 {
   switch (axis) {
     case 'X':
@@ -78,14 +77,14 @@ void ClawMotorController::move(char axis, int speed)
       yMotor.setSpeed(speed);
       Serial.printf("[MOTOR] Y: %d\n", speed);
       break;
+    case 'Z':
+      zMotor.setSpeed(speed);
+      break;
+    default:
+      Serial.printf("[MOTOR] Unbekannte Achse: %c\n", axis);
+      return false;
   }
-}
-
-void ClawMotorController::moveZ(int speed)
-{
-  ropeSpeed = speed;
-  zMotor.setSpeed(speed);
-  Serial.printf("[MOTOR] Z (Seil): %d\n", speed);
+  return true;
 }
 
 void ClawMotorController::setAcceleration(float percentPerSecond)
@@ -100,7 +99,7 @@ void ClawMotorController::setAcceleration(float percentPerSecond)
   Serial.printf("[MOTOR] Beschleunigung geaendert: %.1f %%/s\n", percentPerSecond);
 }
 
-void ClawMotorController::moveClaw(const char *command)
+bool ClawMotorController::moveClaw(const char *command)
 {
   if (strcmp(command, "open") == 0) {
     clawServo.open();
@@ -110,5 +109,7 @@ void ClawMotorController::moveClaw(const char *command)
     Serial.println("[MOTOR] Klaue: close");
   } else {
     Serial.printf("[MOTOR] Klaue: unbekannter Befehl: %s\n", command);
+    return false;
   }
+  return true;
 }

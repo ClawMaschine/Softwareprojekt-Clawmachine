@@ -3,7 +3,10 @@ import os
 Import("env")
 
 platform = env.PioPlatform()
-network_include_dir = os.path.join(
-    platform.get_package_dir("framework-arduinoespressif32"), "libraries", "Network", "src"
+framework_libraries_dir = os.path.join(
+    platform.get_package_dir("framework-arduinoespressif32"), "libraries"
 )
-env.Append(CPPPATH=[network_include_dir])
+# Network: Header, die einige Framework-Libs ohne eigene Abhaengigkeit erwarten.
+# WiFi:    HTTPUpdate (OTA) inkludiert <WiFi.h>, findet es aber nicht von selbst.
+for library_name in ("Network", "WiFi"):
+    env.Append(CPPPATH=[os.path.join(framework_libraries_dir, library_name, "src")])

@@ -9,8 +9,6 @@
 
 class ClawMotorController {
 public:
-  static constexpr const char *COMMAND_TOPIC = "clawmachine/motor_controller/command";
-
   ClawMotorController(
       ClawMqttConnection &connection,
       uint8_t motorShieldAI2cAddress,
@@ -22,9 +20,9 @@ public:
   void begin();
   void update();
 
-  void move(char axis, int speed);
-  void moveZ(int speed);
-  void moveClaw(const char *command);
+  // Liefern false, wenn Achse bzw. Klauen-Befehl unbekannt ist.
+  bool move(char axis, int speed);
+  bool moveClaw(const char *command);
   void setAcceleration(float percentPerSecond);
 
 private:
