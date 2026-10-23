@@ -4,7 +4,9 @@ Beispiel:
     python scripts/dev/ota_update.py claw_motor_controller
 
 Ablauf: pio run -e <env> -> firmware.bin nach firmware_updates/<env>.bin kopieren
-(wird vom Python-Server unter /firmware/<env>.bin ausgeliefert) -> auf
+(wird vom Python-Server unter /firmware/<env>.bin ausgeliefert).
+Mit --no-build wird eine dort schon liegende .bin direkt verwendet (z.B. vom Entwicklungsrechner
+auf den Server kopiert, wo kein PlatformIO installiert ist) -> auf
 clawmachine/<geraetename>/ota die Download-URL publizieren -> auf
 clawmachine/<geraetename>/ota/status warten.
 
@@ -22,7 +24,14 @@ import time
 from configparser import ConfigParser
 from pathlib import Path
 
-import paho.mqtt.client as mqtt
+try:
+    import paho.mqtt.client as mqtt
+except ModuleNotFoundError:
+    sys.exit(
+        "paho-mqtt fehlt. Im Projekt-venv ausfuehren:\n"
+        "  .venv/bin/python scripts/dev/ota_update.py <environment>\n"
+        "oder Abhaengigkeiten installieren: scripts/setup/install_python_dependencies.sh"
+    )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FIRMWARE_UPDATES_DIRECTORY = PROJECT_ROOT / "firmware_updates"
@@ -62,15 +71,26 @@ def main() -> None:
     device_name = arguments.device or read_client_id_from_platformio(arguments.environment)
     download_host = arguments.download_host or broker_host
 
+    published_binary = FIRMWARE_UPDATES_DIRECTORY / f"{arguments.environment}.bin"
+    built_binary = PROJECT_ROOT / ".pio" / "build" / arguments.environment / "firmware.bin"
+
     if not arguments.no_build:
+        if shutil.which("pio") is None:
+            sys.exit(
+                "PlatformIO (pio) nicht gefunden. Auf dem Server nicht noetig: Firmware auf dem Entwicklungsrechner "
+                f"bauen, die .bin nach firmware_updates/{arguments.environment}.bin kopieren und hier mit --no-build starten."
+            )
         if subprocess.run(["pio", "run", "-e", arguments.environment], cwd=PROJECT_ROOT).returncode != 0:
             sys.exit("Build fehlgeschlagen.")
 
-    built_binary = PROJECT_ROOT / ".pio" / "build" / arguments.environment / "firmware.bin"
-    if not built_binary.exists():
-        sys.exit(f"{built_binary} nicht gefunden.")
-    FIRMWARE_UPDATES_DIRECTORY.mkdir(exist_ok=True)
-    shutil.copy(built_binary, FIRMWARE_UPDATES_DIRECTORY / f"{arguments.environment}.bin")
+    # --no-build: bereits abgelegte .bin im Server-Ordner bevorzugen, sonst die frisch gebaute nehmen
+    if arguments.no_build and published_binary.exists():
+        print(f"Nutze vorhandene {published_binary.relative_to(PROJECT_ROOT)}")
+    elif built_binary.exists():
+        FIRMWARE_UPDATES_DIRECTORY.mkdir(exist_ok=True)
+        shutil.copy(built_binary, published_binary)
+    else:
+        sys.exit(f"Keine Firmware gefunden: weder {published_binary} noch {built_binary}.")
 
     url = f"http://{download_host}:{arguments.download_port}/firmware/{arguments.environment}.bin"
     ota_topic = f"clawmachine/{device_name}/ota"
