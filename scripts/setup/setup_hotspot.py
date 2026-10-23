@@ -5,6 +5,7 @@ Wandelt ein WLAN-Interface in einen Access Point (SSID: praktikum) um.
 Idempotent – sicher mehrfach ausführbar.
 """
 
+import argparse
 import os
 import re
 import shutil
@@ -452,7 +453,20 @@ def _apply(iface: str, state: dict) -> None:
 
 # ─── Hauptprogramm ────────────────────────────────────────────────────────────
 
+def _parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Clawmachine – WLAN-Hotspot einrichten.")
+    parser.add_argument(
+        "-y", "--yes",
+        action="store_true",
+        help="Alle Rückfragen mit dem Standardwert beantworten "
+             "(Standard-Interface; bereits aktiven Hotspot NICHT neu konfigurieren)",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    arguments = _parse_arguments()
+
     if os.geteuid() != 0:
         console.print("[red]✗ Bitte als root ausführen (sudo python3 setup_hotspot.py).[/]")
         sys.exit(1)
@@ -471,7 +485,10 @@ def main() -> None:
     default_iface = "wlan0" if "wlan0" in interfaces else interfaces[0]
     _show_interface_table(interfaces, default_iface)
 
-    if len(interfaces) > 1:
+    if len(interfaces) > 1 and arguments.yes:
+        iface = default_iface
+        console.print(f"  → [cyan]{iface}[/] wird verwendet [dim](-y: Standard)[/]")
+    elif len(interfaces) > 1:
         iface = Prompt.ask("  Interface auswählen", choices=interfaces, default=default_iface)
     else:
         iface = default_iface
@@ -485,6 +502,10 @@ def main() -> None:
 
     if _is_fully_configured(state):
         console.print()
+        if arguments.yes:
+            console.print("  Hotspot ist bereits aktiv, keine Neukonfiguration [dim](-y: Standard)[/]")
+            _show_final_state(iface)
+            return
         if not Confirm.ask("  Hotspot ist bereits aktiv. Neu konfigurieren?", default=False):
             _show_final_state(iface)
             return
@@ -498,7 +519,9 @@ def main() -> None:
 
     # 4. Bestätigung
     console.print()
-    if not Confirm.ask("  Konfiguration anwenden?", default=True):
+    if arguments.yes:
+        console.print("  Konfiguration anwenden? [dim](-y: ja)[/]")
+    elif not Confirm.ask("  Konfiguration anwenden?", default=True):
         console.print("[yellow]Abgebrochen.[/]")
         sys.exit(0)
 

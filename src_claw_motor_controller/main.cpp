@@ -85,6 +85,17 @@ void setup()
   Serial.begin(115200);
   delay(200);
   Serial.println();
+  Serial.println("[MOTOR_CONTROLLER] Configuration:");
+  Serial.printf("[MOTOR_CONTROLLER] WiFi SSID: %s\n", CLAW_CLIENT_WIFI_SSID);
+  Serial.printf("[MOTOR_CONTROLLER] MQTT Broker: %s:%d\n", CLAW_MQTT_BROKER_HOST, CLAW_MQTT_BROKER_PORT);
+  Serial.printf("[MOTOR_CONTROLLER] MQTT Client ID: %s\n", CLAW_MOTOR_CONTROLLER_CLIENT_ID);
+  Serial.printf("[MOTOR_CONTROLLER] MQTT User: %s\n", CLAW_MQTT_USER_USERNAME);
+  Serial.printf("[MOTOR_CONTROLLER] Motor Shield A I2C Address: 0x%02X\n", CLAW_MOTOR_SHIELD_A_I2C_ADDRESS);
+  Serial.printf("[MOTOR_CONTROLLER] Motor Shield B I2C Address    : 0x%02X\n", CLAW_MOTOR_SHIELD_B_I2C_ADDRESS);
+  Serial.printf("[MOTOR_CONTROLLER] Max RPM: %d\n", CLAW_MOTOR_MAX_REVOLUTIONS_PER_MINUTE);
+  Serial.printf("[MOTOR_CONTROLLER] Acceleration: %.1f %%/s\n", CLAW_MOTOR_ACCELERATION_PERCENT_PER_SECOND);
+  Serial.printf("[MOTOR_CONTROLLER] Claw Servo Pin: %d\n", CLAW_CLAW_SERVO_PIN);
+  Serial.printf("[MOTOR_CONTROLLER] OTA Allowed Host: %s\n", CLAW_MQTT_BROKER_HOST);
   Serial.println("[MOTOR_CONTROLLER] MQTT client starts");
   Serial.print("[MOTOR_CONTROLLER] Client ID: ");
   Serial.println(CLAW_MOTOR_CONTROLLER_CLIENT_ID);

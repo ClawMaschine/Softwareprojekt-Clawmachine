@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from configparser import ConfigParser
 from pathlib import Path
 
@@ -47,6 +48,7 @@ def main() -> None:
     parser.add_argument("--device", help="MQTT-Geraetename (Standard: Client-ID aus platformio.ini)")
     parser.add_argument("--download-host", help="Host in der Download-URL (Standard: [mqtt] broker aus config.ini)")
     parser.add_argument("--download-port", type=int, default=8000, help="HTTP-Port des Servers (Standard: 8000)")
+    parser.add_argument("--timeout", type=int, default=180, help="Sekunden auf Status-Antwort des Geraets warten (Standard: 180)")
     parser.add_argument("--no-build", action="store_true", help="Nicht neu bauen, vorhandenes firmware.bin nutzen")
     arguments = parser.parse_args()
 
@@ -95,7 +97,14 @@ def main() -> None:
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect(broker_host, broker_port)
-    client.loop_forever()
+    client.loop_start()
+    waited_seconds = 0
+    while result["state"] is None and waited_seconds < arguments.timeout:
+        time.sleep(1)
+        waited_seconds += 1
+    client.loop_stop()
+    if result["state"] is None:
+        print(f"Keine Antwort von '{device_name}' nach {arguments.timeout} s — laeuft auf dem Board schon eine Firmware mit OTA?")
     sys.exit(0 if result["state"] == "success" else 1)
 
 

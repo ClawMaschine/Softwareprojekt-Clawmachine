@@ -5,6 +5,7 @@ Installiert Docker, Python-Abhängigkeiten und richtet den WLAN-Hotspot ein.
 Idempotent – sicher mehrfach ausführbar.
 """
 
+import argparse
 import os
 import re
 import shutil
@@ -289,9 +290,23 @@ def _setup_mosquitto_password() -> None:
 
 # ─── Hauptprogramm ────────────────────────────────────────────────────────────
 
+def _parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Clawmachine – Server-Setup (Docker, Python-Abhängigkeiten, WLAN-Hotspot).",
+    )
+    parser.add_argument(
+        "-y", "--yes",
+        action="store_true",
+        help="Alle Rückfragen mit dem Standardwert beantworten (auch im Hotspot-Setup)",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    arguments = _parse_arguments()
+
     if os.geteuid() != 0:
-        console.print("[red]✗ Bitte als root ausführen (sudo python3 setup_server.py).[/]")
+        console.print("[red]✗ Bitte als root ausführen (sudo python3 setup_server.py [-y]).[/]")
         sys.exit(1)
 
     _show_header()
@@ -309,7 +324,9 @@ def main() -> None:
 
     # 3. Bestätigung
     console.print()
-    if not Confirm.ask("  Setup ausführen?", default=True):
+    if arguments.yes:
+        console.print("  Setup ausführen? [dim](-y: ja)[/]")
+    elif not Confirm.ask("  Setup ausführen?", default=True):
         console.print("[yellow]Abgebrochen.[/]")
         sys.exit(0)
 
@@ -344,7 +361,10 @@ def main() -> None:
     console.print()
     console.print(Rule("[bold]6 · WLAN-Hotspot[/]", style="cyan"))
     hotspot = _SCRIPT_DIR / "setup_hotspot.py"
-    subprocess.run([sys.executable, str(hotspot)])
+    hotspot_command = [sys.executable, str(hotspot)]
+    if arguments.yes:
+        hotspot_command.append("--yes")
+    subprocess.run(hotspot_command)
 
     # 9. Mosquitto-Zugangsdaten
     console.print()
