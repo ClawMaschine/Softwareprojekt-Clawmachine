@@ -119,16 +119,16 @@ class ClawMachine:
         mqtt_network_client = self.mqtt_client.client
         if mqtt_network_client is None:
             raise RuntimeError("MQTT client is not connected. Call connect() first.")
-        mqtt_network_client.subscribe(self.control_topic)
-        mqtt_network_client.subscribe(device_topic("+", "metadata", "uptime"))
-        mqtt_network_client.subscribe(device_topic("+", "status"))
-        mqtt_network_client.subscribe(WEB_INTERFACE_DEVICE_LIST_REQUEST_TOPIC)
-        mqtt_network_client.subscribe(PLAYER_INPUT_PANEL_TOPIC)
-        mqtt_network_client.subscribe(PLAYER_INPUT_JOYCON_TOPIC)
-        mqtt_network_client.subscribe(WEB_INTERFACE_COMMAND_TOPIC)
-        mqtt_network_client.subscribe(WEB_INTERFACE_INPUT_SOURCES_REQUEST_TOPIC)
-        mqtt_network_client.subscribe(WEB_INTERFACE_INPUT_SOURCES_SET_TOPIC)
-        mqtt_network_client.subscribe(ENDSTOP_TOPIC)
+        self.mqtt_client.subscribe(self.control_topic)
+        self.mqtt_client.subscribe(device_topic("+", "metadata", "uptime"))
+        self.mqtt_client.subscribe(device_topic("+", "status"))
+        self.mqtt_client.subscribe(WEB_INTERFACE_DEVICE_LIST_REQUEST_TOPIC)
+        self.mqtt_client.subscribe(PLAYER_INPUT_PANEL_TOPIC)
+        self.mqtt_client.subscribe(PLAYER_INPUT_JOYCON_TOPIC)
+        self.mqtt_client.subscribe(WEB_INTERFACE_COMMAND_TOPIC)
+        self.mqtt_client.subscribe(WEB_INTERFACE_INPUT_SOURCES_REQUEST_TOPIC)
+        self.mqtt_client.subscribe(WEB_INTERFACE_INPUT_SOURCES_SET_TOPIC)
+        self.mqtt_client.subscribe(ENDSTOP_TOPIC)
         mqtt_network_client.on_message = self.on_message
 
     def ensure_device_registered(self, esp_name: str) -> Optional[EspDevice]:

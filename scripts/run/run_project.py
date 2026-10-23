@@ -37,6 +37,9 @@ from rich.text import Text  # noqa: E402
 
 console = Console()
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "setup"))
+from mosquitto_password import ensure_mosquitto_password_file  # noqa: E402
+
 _SCRIPT_DIR = Path(__file__).parent
 _REPO_ROOT = _SCRIPT_DIR.parent.parent
 _COMPOSE = _REPO_ROOT / "docker" / "docker-compose.yml"
@@ -137,6 +140,15 @@ def _check_prerequisites() -> bool:
     return True
 
 
+def _stream(cmd: list[str], title: str) -> bool:
+    console.print(f"\n  [bold dim]▸ {title}[/]")
+    if subprocess.run(cmd).returncode != 0:
+        console.print("  [red]✗ Fehlgeschlagen[/]")
+        return False
+    console.print(f"  [green]✓ {title}[/]")
+    return True
+
+
 def _build_and_start() -> bool:
     console.print("\n  [bold dim]▸ Images bauen[/]")
     if subprocess.run(["docker", "compose", *_COMPOSE_FILE_ARGS, "build"]).returncode != 0:
@@ -162,6 +174,11 @@ def main() -> None:
     ))
 
     if not _check_prerequisites():
+        sys.exit(1)
+
+    # Ohne Passwortdatei startet der Broker-Container nicht (Restart-Schleife).
+    if not ensure_mosquitto_password_file(console, _stream):
+        console.print("  [red]✗ Ohne Mosquitto-Passwortdatei startet der Broker nicht – Abbruch[/]")
         sys.exit(1)
 
     if not _build_and_start():

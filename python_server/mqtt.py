@@ -22,12 +22,18 @@ class MQTTClient:
         self.connect_timeout_seconds = float(connect_timeout_seconds)
         self.client = None
         self.is_connected = False
+        self.subscribed_topics = []
 
     def connect(self):
         def on_connect(client, userdata, flags, rc):
             if rc == 0:
                 print(f"Connected to MQTT Broker!")
                 self.is_connected = True
+                # Nach einem Verbindungsabbruch (z.B. Broker-Neustart) hat der
+                # Broker die Subscriptions vergessen — deshalb bei jedem
+                # (Wieder-)Verbinden erneut abonnieren.
+                for topic in self.subscribed_topics:
+                    client.subscribe(topic)
             else:
                 print(f"Failed to connect, return code %d\n", rc)
                 self.is_connected = False
@@ -51,6 +57,13 @@ class MQTTClient:
                 f"MQTT connection to {self.broker}:{self.port} timed out after {self.connect_timeout_seconds} seconds"
             )
         return self.client
+
+    def subscribe(self, topic):
+        if self.client is None:
+            raise RuntimeError("MQTT client is not connected. Call connect() first.")
+        if topic not in self.subscribed_topics:
+            self.subscribed_topics.append(topic)
+        self.client.subscribe(topic)
 
     def publish(self, topic, msg):
         if self.client is None:
