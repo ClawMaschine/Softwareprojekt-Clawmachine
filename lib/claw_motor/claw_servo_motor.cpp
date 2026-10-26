@@ -26,8 +26,9 @@ void ClawServoMotor::begin()
   }
 }
 
-void ClawServoMotor::moveToAngle(uint8_t angleDegrees)
+void ClawServoMotor::setAngle(uint8_t angleDegrees)
 {
+  angleDegrees = constrain(angleDegrees, 0, 180);
   if (!servo.attached()) {
     Serial.println("[SERVO] FEHLER: Servo nicht angehaengt, Befehl ignoriert");
     return;
@@ -38,10 +39,10 @@ void ClawServoMotor::moveToAngle(uint8_t angleDegrees)
 
 void ClawServoMotor::open()
 {
-  moveToAngle(openAngleDegrees);
+  setAngle(openAngleDegrees);
 }
 
 void ClawServoMotor::close()
 {
-  moveToAngle(closedAngleDegrees);
+  setAngle(closedAngleDegrees);
 }
