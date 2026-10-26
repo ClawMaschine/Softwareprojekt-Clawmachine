@@ -18,7 +18,11 @@ void ClawServoMotor::begin()
   servo.setPeriodHertz(SERVO_PERIOD_HERTZ);
   const int attachedChannel = servo.attach(servoPin, SERVO_MIN_PULSE_MICROSECONDS, SERVO_MAX_PULSE_MICROSECONDS);
 
-  if (attachedChannel == 0 || !servo.attached()) {
+  // Kanal 0 ist ein gueltiger LEDC-Kanal (der erste Servo bekommt ihn), deshalb
+  // nur attached() auswerten. Die ESP32Servo-Logzeilen "Pin ... is already attached
+  // to LEDC" / "PWM channel failed to configure" stammen aus einem doppelten
+  // internen Attach der Library und sind harmlos, wenn attached() true ist.
+  if (!servo.attached()) {
     Serial.printf("[SERVO] FEHLER: attach auf GPIO %u fehlgeschlagen (Pin nicht PWM-faehig oder keine Timer frei)\n", servoPin);
   } else {
     Serial.printf("[SERVO] GPIO %u, LEDC-Kanal %d, %d-%d us, %d Hz\n", servoPin, attachedChannel,

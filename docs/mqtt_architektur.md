@@ -1,7 +1,11 @@
 # MQTT-Architektur Clawmachine
 
-Stand: aus dem Code abgeleitet (`python_server/clawmachine/claw_machine.py`, `moving.py`,
-`src_*/main.cpp`, `lib/claw_mqtt_connection`, `frontend/src/app/services/mqtt.service.ts`).
+Stand: aus dem Code abgeleitet (`python_server/clawmachine/topics.py`, `claw_machine.py`, `moving.py`,
+`src_*/main.cpp`, `lib/claw_mqtt_connection`, `lib/claw_ota`, `frontend/src/app/services/mqtt.service.ts`).
+
+Alle Topic-Namen des Servers stehen zentral in `python_server/clawmachine/topics.py` und werden dort
+aus `CLAWMACHINE_TOPIC_PREFIX` (`clawmachine`) per `device_topic(<name>, ...)` bzw. `web_interface_topic(...)`
+zusammengesetzt. Das Gegenstück `parse_device_name(topic, ...)` liest den Gerätenamen wieder aus einem Topic.
 
 ## 1. Teilnehmer
 
@@ -13,10 +17,13 @@ Stand: aus dem Code abgeleitet (`python_server/clawmachine/claw_machine.py`, `mo
 | Control-Panel | ESP32, `src_claw_panel_test` | `claw_player_input` | Physische Taster des Spielers |
 | Switch-2-Joy-Con | ESP32, `src_claw_switch2_scanner` (BLE) | `claw_switch2_scanner` | Joy-Con-Eingabe |
 | Webinterface | Browser (Angular), per WebSocket Port 9001 | `claw_web_interface_<4-stellige-ID>` | Bedienung, Geräteliste, Anzeige |
-| Emulierter ESP | `python_server/emulated_esp` | `emulated_esp` | Testgerät (Uptime bzw. Steuerbefehle) |
+| Emulierter ESP | `python_server/emulated_esp` | `emulated_esp` | Testgerät (Uptime, `error_log`-Dummy bzw. Steuerbefehle) |
+| OTA-Skript | Entwicklungsrechner, `scripts/dev/ota_update.py` | – | Baut Firmware, publiziert Download-URL auf `<name>/ota`, wartet auf `<name>/ota/status` |
 | Broker | Mosquitto, Port 1883 (MQTT) / 9001 (WebSocket) | – | Vermittler, Login Pflicht (`allow_anonymous false`) |
 
 Alle Clients melden sich mit Benutzer/Passwort aus `config.ini` (`[mqtt]`) am Broker an.
+Der Python-Server merkt sich seine Subscriptions (`MQTTClient.subscribe`) und abonniert sie nach jedem
+Wiederverbinden (z. B. Broker-Neustart) automatisch neu.
 
 ## 2. Datenfluss
 
@@ -44,6 +51,8 @@ Alle Clients melden sich mit Benutzer/Passwort aus `config.ini` (`[mqtt]`) am Br
 
 Kernprinzip: **Eingabegeräte sprechen nie direkt mit den Motoren.** Alles läuft über den Server.
 Der Server ist die einzige Stelle, die auf `motor_controller/*` schreibt.
+Beim Start publiziert der Server außerdem die Homing-Sequenz (`Moving.start_homing_sequence()`, aufgerufen in
+`ClawMachine.__init__`), die anhand der Endstop-Meldungen die Achsen nacheinander referenziert.
 
 Ablauf einer Spielereingabe:
 1. Panel oder Joy-Con publiziert den Tastenzustand (JSON) auf `player_input/panel` bzw. `player_input/joycon`.
@@ -63,9 +72,22 @@ Richtung: **→ Broker** = Publisher, **← Broker** = Subscriber. `<name>` = Cl
 | `clawmachine/<name>/status` | ESP → Server, Webinterface | Text `online` / `offline` | ja | `online` beim Verbinden, `offline` als Last Will (QoS 1). Webinterface sendet das gleiche für sich selbst |
 | `clawmachine/<name>/metadata/uptime` | ESP → Server, Webinterface | Text, Millisekunden seit Boot (z. B. `123456`) | nein | alle 5 s |
 | `clawmachine/<name>/registered` | Server → Gerät | Text `ok` | nein | einmalig, wenn der Server ein Gerät zum ersten Mal sieht (automatische Registrierung) |
+| `clawmachine/<name>/error_log` | ESP → Webinterface (Server wertet es nicht aus) | JSON `{"device","topic","payload","error"}` | nein | Motor-Controller meldet unverarbeitbare Befehle (ungültiges JSON, unbekannte Achse/Klauen-Aktion, keine Zahl). `payload` ist auf 100 Zeichen gekürzt. Der Emulator sendet jede Sekunde den Text `Emulated ESP is running.` |
 
 Es gibt kein Anmelde-Topic: ein Gerät gilt als registriert, sobald es auf `status` oder `metadata/uptime` auftaucht.
 Browser-Clients (`<name>` beginnt mit `claw_web_interface_`) werden bewusst nicht in die Geräteliste aufgenommen.
+
+### 3.1.1 OTA-Update (`lib/claw_ota`, derzeit nur Motor-Controller)
+
+| Topic | Von → An | Payload |
+|---|---|---|
+| `clawmachine/<name>/ota` | `ota_update.py` → Gerät | JSON `{"url":"http://<broker-host>:8000/firmware/<env>.bin"}` |
+| `clawmachine/<name>/ota/status` | Gerät → `ota_update.py` | JSON `{"device","state","detail"}` mit `state` = `started`, `success`, `error`, `confirmed`, `rolled_back` |
+
+Das Gerät lädt nur von `http://` und nur vom Broker-Host (`CLAW_MQTT_BROKER_HOST`). Die `.bin` liefert der
+Python-Server unter `/firmware/` aus (Ordner `firmware_updates/`). Vor dem Flashen stoppt der Motor-Controller
+alle Motoren. Die neue Firmware wird erst bestätigt (`confirmed`), wenn MQTT verbunden ist und beide Motor-Shields
+am I2C-Bus antworten, sonst Rollback (`rolled_back`).
 
 ### 3.2 Eingabe → Server
 
@@ -81,7 +103,7 @@ Browser-Clients (`<name>` beginnt mit `claw_web_interface_`) werden bewusst nich
 
 | Topic | Von → An | Payload |
 |---|---|---|
-| `clawmachine/motor_controller/motor/command` | Server → Motor-Controller | Text `X:<v>`, `Y:<v>`, `Z:<v>` (Geschwindigkeit, ganzzahlig, negativ = Gegenrichtung, `0` = Stopp) oder `claw:<aktion>` (z. B. `claw:open`, `claw:close`) |
+| `clawmachine/motor_controller/motor/command` | Server → Motor-Controller | Text `X:<v>`, `Y:<v>`, `Z:<v>` (Geschwindigkeit, ganzzahlig, negativ = Gegenrichtung, `0` = Stopp) oder `claw:<aktion>` (`claw:open`, `claw:close`). Der Motor-Controller akzeptiert zusätzlich JSON, z. B. `{"X":100,"Y":0,"Z":0,"claw":"open"}`; nur enthaltene Felder werden angewendet. Der Server sendet bisher das Textformat |
 | `clawmachine/motor_controller/settings` | Server → Motor-Controller | JSON `{"accelerationPercentPerSecond": 50.0}` |
 
 ### 3.4 Server ↔ Webinterface
@@ -124,10 +146,10 @@ Auffälligkeiten:
 ## 6. Abweichungen und tote Reste im Code
 
 - `include/firmware_config.h`: `CLAW_DEVICE_ADDED_TOPIC "clawmachine/device/added"` ist ein Rest der alten Anmeldung und wird nicht mehr genutzt.
-- `src_claw_motor_controller/claw_motor_controller.h`: `COMMAND_TOPIC "clawmachine/motor_controller/command"` weicht vom tatsächlich abonnierten `.../motor/command` ab. `main.cpp` nutzt die richtigen Topics, die Klasse `claw_motor_controller.cpp` ist damit veraltet bzw. ungenutzt.
-- Server abonniert `clawmachine/+/internal`, behandelt es aber nicht (fällt in `case _`). Niemand publiziert darauf.
-- `CLAWMACHINE_TOPIC_PREFIX`-Doku in `CLAUDE.md` nennt noch `clawmachine/joycon`, `claw/uptime_*` und ein Joy-Con-Classic-Bluetooth-Setup. Das ist überholt: der Joy-Con läuft über `player_input/joycon`, Uptime über `<name>/metadata/uptime`.
-- `Moving.start_homing_sequence()` existiert, wird aber nirgends aufgerufen. Das Homing kann damit per MQTT aktuell nicht ausgelöst werden.
+- Motor-Controller (`main.cpp`) nimmt im JSON-Befehl `"claw"` auch eine Zahl (Winkel 0–180) an, `ClawMotorController::moveClaw()` kennt aber nur `open`/`close`. Ein numerischer Wert endet daher im `error_log` (`Unbekannter Klauen-Befehl`). `ClawServoMotor::setAngle()` ist schon vorhanden, aber nicht angebunden (Stand: nicht committet).
+- `error_log` und `ota/status` werden vom Server nicht ausgewertet, nur vom Webinterface (über `clawmachine/#`) bzw. `ota_update.py` gelesen.
+- Die Topic-Doku in `CLAUDE.md` nennt noch `clawmachine/joycon`, `claw/uptime_*` und ein Joy-Con-Classic-Bluetooth-Setup. Das ist überholt: der Joy-Con läuft über `player_input/joycon`, Uptime über `<name>/metadata/uptime`.
+- Homing läuft nur automatisch beim Serverstart. Es gibt kein MQTT-Topic, um es zur Laufzeit neu auszulösen.
 - Zwei Server mit der Client-ID `server` verdrängen sich gegenseitig vom Broker ("session taken over").
 
 ## 7. Vorschlag für eine einheitliche Struktur (noch nicht umgesetzt)

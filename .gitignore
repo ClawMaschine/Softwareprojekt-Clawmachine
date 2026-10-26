@@ -35,3 +35,4 @@ logs/
 **/__pycache__/
 docker/docker-compose.override.yml
 docker/config.local.container.ini
+.pio-docker/

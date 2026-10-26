@@ -14,10 +14,12 @@ public:
   void setAngle(uint8_t angleDegrees);
 
 private:
-  // Standard-Servo (z.B. SG90/MG90): 50 Hz, Pulsbreite 500-2400 us.
+  // 50 Hz, Pulsbreite wie im Original-Greifer (Greifer_Komplett.ino): auf = 1320 us,
+  // zu = 1790 us. Ein groesserer Bereich (Standard-Servo 500-2400 us) laesst den
+  // Servo am Greifer anschlagen.
   static const int SERVO_PERIOD_HERTZ = 50;
-  static const int SERVO_MIN_PULSE_MICROSECONDS = 500;
-  static const int SERVO_MAX_PULSE_MICROSECONDS = 2400;
+  static const int SERVO_MIN_PULSE_MICROSECONDS = 1320;
+  static const int SERVO_MAX_PULSE_MICROSECONDS = 1790;
 
   Servo servo;
   uint8_t servoPin;

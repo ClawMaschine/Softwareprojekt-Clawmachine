@@ -163,8 +163,12 @@ void applyMotorCommand(const char *topic, const String &message)
       }
     }
     if (!jsonDoc["claw"].isNull()) {
-      const char *clawCommand = jsonDoc["claw"].is<const char *>() ? jsonDoc["claw"].as<const char *>() : "";
-      if (!movementController.moveClaw(clawCommand)) {
+      JsonVariantConst clawValue = jsonDoc["claw"];
+      // "open"/"close" oder eine Zahl 0-180 (Grad)
+      String clawCommand = clawValue.is<const char *>() ? String(clawValue.as<const char *>())
+                         : clawValue.is<int>()          ? String(clawValue.as<int>())
+                                                        : String("");
+      if (!movementController.moveClaw(clawCommand.c_str())) {
         publishErrorLog(topic, message, "Unbekannter Klauen-Befehl");
       }
     }

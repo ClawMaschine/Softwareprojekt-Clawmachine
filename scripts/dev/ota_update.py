@@ -3,12 +3,13 @@
 Beispiel:
     python scripts/dev/ota_update.py claw_motor_controller
 
-Ablauf: pio run -e <env> -> firmware.bin nach firmware_updates/<env>.bin kopieren
-(wird vom Python-Server unter /firmware/<env>.bin ausgeliefert).
-Mit --no-build wird eine dort schon liegende .bin direkt verwendet (z.B. vom Entwicklungsrechner
-auf den Server kopiert, wo kein PlatformIO installiert ist) -> auf
-clawmachine/<geraetename>/ota die Download-URL publizieren -> auf
-clawmachine/<geraetename>/ota/status warten.
+Ablauf: Firmware im Docker-Container bauen (Image clawmachine-pio-builder, wird beim
+ersten Aufruf gebaut; --host-pio nutzt stattdessen das lokal installierte PlatformIO)
+-> firmware.bin nach firmware_updates/<env>.bin kopieren (wird vom Python-Server unter
+/firmware/<env>.bin ausgeliefert) -> auf clawmachine/<geraetename>/ota die Download-URL
+publizieren -> auf clawmachine/<geraetename>/ota/status warten.
+
+Mit --no-build wird nicht gebaut, sondern eine dort schon liegende .bin verwendet.
 
 Der Geraetename ist die MQTT-Client-ID des Boards (CLAW_*_CLIENT_ID in
 platformio.ini). Die Download-URL nutzt standardmaessig den Broker-Host aus
@@ -16,6 +17,7 @@ config.ini — das ESP akzeptiert nur genau diesen Host.
 """
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -35,6 +37,38 @@ except ModuleNotFoundError:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FIRMWARE_UPDATES_DIRECTORY = PROJECT_ROOT / "firmware_updates"
+
+PLATFORMIO_BUILDER_IMAGE = "clawmachine-pio-builder"
+PLATFORMIO_BUILDER_CACHE_VOLUME = "clawmachine-pio-cache"
+# Eigenes PlatformIO-Workspace im Repo fuer Docker-Builds, damit das .pio des
+# Hosts (andere Pfade, andere Toolchain) nicht ueberschrieben wird.
+DOCKER_WORKSPACE_DIRECTORY_NAME = ".pio-docker"
+
+
+def build_firmware_in_docker(environment: str) -> None:
+    if shutil.which("docker") is None:
+        sys.exit("docker nicht gefunden – bitte setup_server.py ausfuehren oder mit --host-pio lokal bauen.")
+
+    dockerfile_directory = PROJECT_ROOT / "docker" / "platformio_builder"
+    if subprocess.run(["docker", "image", "inspect", PLATFORMIO_BUILDER_IMAGE], capture_output=True).returncode != 0:
+        print(f"Baue Image '{PLATFORMIO_BUILDER_IMAGE}' (einmalig) ...")
+        if subprocess.run(["docker", "build", "-t", PLATFORMIO_BUILDER_IMAGE, str(dockerfile_directory)]).returncode != 0:
+            sys.exit("Build des PlatformIO-Images fehlgeschlagen.")
+
+    print(f"Baue Firmware '{environment}' im Container (erster Lauf laedt die Toolchain, das dauert) ...")
+    command = [
+        "docker", "run", "--rm",
+        # UID/GID des Aufrufers: sonst gehoeren die Build-Dateien im Repo root
+        "--user", f"{os.getuid()}:{os.getgid()}",
+        "-e", f"PLATFORMIO_WORKSPACE_DIR=/workspace/{DOCKER_WORKSPACE_DIRECTORY_NAME}",
+        "-e", "HOME=/tmp",
+        "-v", f"{PROJECT_ROOT}:/workspace",
+        "-v", f"{PLATFORMIO_BUILDER_CACHE_VOLUME}:/pio-cache",
+        PLATFORMIO_BUILDER_IMAGE,
+        "pio", "run", "-e", environment,
+    ]
+    if subprocess.run(command).returncode != 0:
+        sys.exit("Build im Container fehlgeschlagen.")
 
 
 def read_client_id_from_platformio(environment: str) -> str:
@@ -59,6 +93,7 @@ def main() -> None:
     parser.add_argument("--download-port", type=int, default=8000, help="HTTP-Port des Servers (Standard: 8000)")
     parser.add_argument("--timeout", type=int, default=180, help="Sekunden auf Status-Antwort des Geraets warten (Standard: 180)")
     parser.add_argument("--no-build", action="store_true", help="Nicht neu bauen, vorhandenes firmware.bin nutzen")
+    parser.add_argument("--host-pio", action="store_true", help="Statt im Docker-Container mit dem lokal installierten PlatformIO bauen")
     arguments = parser.parse_args()
 
     config = ConfigParser()
@@ -72,16 +107,17 @@ def main() -> None:
     download_host = arguments.download_host or broker_host
 
     published_binary = FIRMWARE_UPDATES_DIRECTORY / f"{arguments.environment}.bin"
-    built_binary = PROJECT_ROOT / ".pio" / "build" / arguments.environment / "firmware.bin"
+    build_directory = PROJECT_ROOT / (".pio" if arguments.host_pio else DOCKER_WORKSPACE_DIRECTORY_NAME)
+    built_binary = build_directory / "build" / arguments.environment / "firmware.bin"
 
     if not arguments.no_build:
-        if shutil.which("pio") is None:
-            sys.exit(
-                "PlatformIO (pio) nicht gefunden. Auf dem Server nicht noetig: Firmware auf dem Entwicklungsrechner "
-                f"bauen, die .bin nach firmware_updates/{arguments.environment}.bin kopieren und hier mit --no-build starten."
-            )
-        if subprocess.run(["pio", "run", "-e", arguments.environment], cwd=PROJECT_ROOT).returncode != 0:
-            sys.exit("Build fehlgeschlagen.")
+        if arguments.host_pio:
+            if shutil.which("pio") is None:
+                sys.exit("PlatformIO (pio) nicht gefunden – ohne --host-pio wird im Docker-Container gebaut.")
+            if subprocess.run(["pio", "run", "-e", arguments.environment], cwd=PROJECT_ROOT).returncode != 0:
+                sys.exit("Build fehlgeschlagen.")
+        else:
+            build_firmware_in_docker(arguments.environment)
 
     # --no-build: bereits abgelegte .bin im Server-Ordner bevorzugen, sonst die frisch gebaute nehmen
     if arguments.no_build and published_binary.exists():

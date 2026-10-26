@@ -9,9 +9,10 @@
 namespace {
 constexpr uint32_t PWM_FREQUENCY_HZ = 50;
 constexpr uint8_t PWM_RESOLUTION_BITS = 14; // Duty 0-16383 entspricht 0-20 ms
-// 1 ms = 819, 1,5 ms = 1229, 2 ms = 1638
-constexpr uint32_t SWEEP_MIN_DUTY = 819;
-constexpr uint32_t SWEEP_MAX_DUTY = 1638;
+// Duty = Pulsbreite_us * 16384 / 20000. Bereich wie im Original-Greifer:
+// auf = 1320 us = 1081, zu = 1790 us = 1466
+constexpr uint32_t SWEEP_MIN_DUTY = 1081;
+constexpr uint32_t SWEEP_MAX_DUTY = 1466;
 constexpr uint32_t SWEEP_STEP_DUTY = 5;
 constexpr unsigned long SWEEP_STEP_DELAY_MS = 25; // groesser = langsamere Fahrt
 }
