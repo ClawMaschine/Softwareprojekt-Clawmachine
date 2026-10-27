@@ -68,6 +68,8 @@ def load_camera_configuration() -> CameraConfiguration:
 class MotorSpeedConfiguration:
     xy_percent: int
     z_percent: int
+    xy_acceleration: int
+    z_acceleration: int
     claw_degrees_per_second: float
     minimum_percent: int
 
@@ -79,6 +81,8 @@ def load_motor_speed_configuration() -> MotorSpeedConfiguration:
 
     xy_percent = config_parser.getint("motor_speed", "xy_percent", fallback=100)
     z_percent = config_parser.getint("motor_speed", "z_percent", fallback=100)
+    xy_acceleration = config_parser.getint("motor_speed", "xy_accel", fallback=100)
+    z_acceleration = config_parser.getint("motor_speed", "z_accel", fallback=100)
     claw_degrees_per_second = config_parser.getfloat(
         "motor_speed", "claw_degrees_per_second", fallback=35.0
     )
@@ -89,5 +93,7 @@ def load_motor_speed_configuration() -> MotorSpeedConfiguration:
         minimum_percent=max(0, min(100, minimum_percent)),
         xy_percent=max(0, min(100, xy_percent)),
         z_percent=max(0, min(100, z_percent)),
+        xy_acceleration=max(0, xy_acceleration),
+        z_acceleration=max(0, z_acceleration),
         claw_degrees_per_second=claw_degrees_per_second,
     )

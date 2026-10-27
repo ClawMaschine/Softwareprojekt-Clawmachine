@@ -42,6 +42,8 @@ export interface SpeedSettings {
   xyPercent: number;
   zPercent: number;
   clawDegreesPerSecond: number;
+  xyAccelerationPercentPerSecond: number;
+  zAccelerationPercentPerSecond: number;
 }
 
 const CLAWMACHINE_TOPIC_PREFIX = 'clawmachine/';

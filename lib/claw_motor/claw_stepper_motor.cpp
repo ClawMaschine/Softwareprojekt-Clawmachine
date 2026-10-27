@@ -24,6 +24,12 @@ void ClawStepperMotor::setSpeed(int speedPercent)
   }
 }
 
+void ClawStepperMotor::stopImmediately()
+{
+  targetSpeedPercent = 0;
+  applySpeed(0);
+}
+
 void ClawStepperMotor::setAcceleration(float percentPerSecond)
 {
   accelerationPercentPerSecond = max(percentPerSecond, 0.0f);

@@ -146,20 +146,37 @@
         >Setzen</button>
       </div>
       <div class="accel-controls">
-        <label class="accel-label" for="accel-input">Beschleunigung (%/s)</label>
+        <label class="accel-label" for="xy-accel-input">Beschleunigung X/Y (%/s)</label>
         <input
-          id="accel-input"
+          id="xy-accel-input"
           class="accel-input"
           type="number"
           min="0"
           step="1"
-          [(ngModel)]="accelerationPercentPerSecond"
+          [(ngModel)]="xyAccelerationPercentPerSecond"
           [disabled]="connectionStatus !== 'connected'"
         />
         <button
           class="btn btn-claw"
           [disabled]="connectionStatus !== 'connected'"
-          (click)="sendAcceleration()"
+          (click)="sendXyAcceleration()"
+        >Setzen</button>
+      </div>
+      <div class="accel-controls">
+        <label class="accel-label" for="z-accel-input">Beschleunigung Z (%/s)</label>
+        <input
+          id="z-accel-input"
+          class="accel-input"
+          type="number"
+          min="0"
+          step="1"
+          [(ngModel)]="zAccelerationPercentPerSecond"
+          [disabled]="connectionStatus !== 'connected'"
+        />
+        <button
+          class="btn btn-claw"
+          [disabled]="connectionStatus !== 'connected'"
+          (click)="sendZAcceleration()"
         >Setzen</button>
       </div>
       <div class="accel-controls">

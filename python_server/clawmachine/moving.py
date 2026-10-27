@@ -58,16 +58,23 @@ class Moving:
             elif is_triggered and self.commanded_speed[axis] < 0:
                 # Achse faehrt gerade auf ihren Endstop zu: sofort stoppen
                 print(f"[MOVING] Endstop {axis} ausgeloest — Achse gestoppt")
-                self.__send_axis_speed(axis, 0)
+                self.__stop_axis_immediately(axis)
 
     def __send_axis_speed(self, axis, speed: int):
         self.commanded_speed[axis] = speed
         self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"{axis}:{speed}")
 
+    def __stop_axis_immediately(self, axis):
+        # Sofortstopp ohne Beschleunigungsrampe des Motor-Controllers (Endstop,
+        # Homing). Normales Loslassen einer Taste laeuft weiter ueber "X:0" und
+        # wird ueber die Rampe abgebremst.
+        self.commanded_speed[axis] = 0
+        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"stop:{axis}")
+
     def __finish_homing(self, axis):
         self.homing_in_progress[axis] = False
         self.position[axis] = 0
-        self.__send_axis_speed(axis, 0)
+        self.__stop_axis_immediately(axis)
         print(f"[MOVING] Homing {axis} abgeschlossen")
 
         next_index = HOMING_SEQUENCE.index(axis) + 1
@@ -98,6 +105,19 @@ class Moving:
             self.motor_speed_configuration = replace(self.motor_speed_configuration, xy_percent=percent)
         elif axis == "Z":
             self.motor_speed_configuration = replace(self.motor_speed_configuration, z_percent=percent)
+
+    def acceleration_percent_per_second(self, axis) -> int:
+        if axis in ("X", "Y"):
+            return self.motor_speed_configuration.xy_acceleration
+        return self.motor_speed_configuration.z_acceleration
+
+    def set_acceleration(self, axis, percent_per_second: int):
+        # Beschleunigung in Prozentpunkten pro Sekunde; X und Y teilen sich einen Wert
+        percent_per_second = max(0, int(percent_per_second))
+        if axis in ("X", "Y"):
+            self.motor_speed_configuration = replace(self.motor_speed_configuration, xy_acceleration=percent_per_second)
+        elif axis == "Z":
+            self.motor_speed_configuration = replace(self.motor_speed_configuration, z_acceleration=percent_per_second)
 
     def max_speed_percent(self, axis) -> int:
         # In config.ini ([motor_speed]) eingestellte Standard-Geschwindigkeit der
@@ -137,7 +157,9 @@ class Moving:
             # Statt nur abzubrechen explizit 0 senden: sonst liefe die Achse mit der
             # vorigen Geschwindigkeit weiter.
             print(f"[MOVING] Bewegung der Achse {axis} blockiert — Endstop erreicht")
-            scaled_speed = 0
+            if self.commanded_speed[axis] != 0:
+                self.__stop_axis_immediately(axis)
+            return True
 
         # Nur bei Aenderung senden (Panel/Joy-Con melden auch bei Aenderungen anderer Achsen)
         if scaled_speed == self.commanded_speed[axis]:

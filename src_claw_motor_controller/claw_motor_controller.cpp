@@ -12,7 +12,8 @@ ClawMotorController::ClawMotorController(
     : connection(connection),
       motorShieldAI2cAddress(motorShieldAI2cAddress),
       motorShieldBI2cAddress(motorShieldBI2cAddress),
-      accelerationPercentPerSecond(accelerationPercentPerSecond),
+      xyAccelerationPercentPerSecond(accelerationPercentPerSecond),
+      zAccelerationPercentPerSecond(accelerationPercentPerSecond),
       motorShieldA(motorShieldAI2cAddress),
       motorShieldB(motorShieldBI2cAddress),
       xMotorLeft(motorShieldB, 1, maxRevolutionsPerMinute),
@@ -39,15 +40,16 @@ void ClawMotorController::begin()
   zMotor.begin();
   clawServo.begin();
 
-  xMotorLeft.setAcceleration(accelerationPercentPerSecond);
-  yMotor.setAcceleration(accelerationPercentPerSecond);
-  xMotorRight.setAcceleration(accelerationPercentPerSecond);
-  zMotor.setAcceleration(accelerationPercentPerSecond);
+  xMotorLeft.setAcceleration(xyAccelerationPercentPerSecond);
+  yMotor.setAcceleration(xyAccelerationPercentPerSecond);
+  xMotorRight.setAcceleration(xyAccelerationPercentPerSecond);
+  zMotor.setAcceleration(zAccelerationPercentPerSecond);
 
   // Permanenter Log, damit sich "wird die Beschleunigung wirklich genutzt?"
   // direkt am Serial-Monitor beim Booten beantworten laesst, ohne den Code
   // lesen zu muessen. 0 heisst: kein Ramping, Geschwindigkeit springt sofort.
-  Serial.printf("[MOTOR] Beschleunigung: %.1f %%/s\n", accelerationPercentPerSecond);
+  Serial.printf("[MOTOR] Beschleunigung X/Y: %.1f %%/s, Z: %.1f %%/s\n",
+                xyAccelerationPercentPerSecond, zAccelerationPercentPerSecond);
 
 }
 
@@ -95,14 +97,51 @@ void ClawMotorController::setClawSpeed(float degreesPerSecond)
 
 void ClawMotorController::setAcceleration(float percentPerSecond)
 {
-  accelerationPercentPerSecond = percentPerSecond;
+  setXyAcceleration(percentPerSecond);
+  setZAcceleration(percentPerSecond);
+}
+
+void ClawMotorController::setXyAcceleration(float percentPerSecond)
+{
+  xyAccelerationPercentPerSecond = percentPerSecond;
 
   xMotorLeft.setAcceleration(percentPerSecond);
   yMotor.setAcceleration(percentPerSecond);
   xMotorRight.setAcceleration(percentPerSecond);
+
+  Serial.printf("[MOTOR] Beschleunigung X/Y geaendert: %.1f %%/s\n", percentPerSecond);
+}
+
+void ClawMotorController::setZAcceleration(float percentPerSecond)
+{
+  zAccelerationPercentPerSecond = percentPerSecond;
+
   zMotor.setAcceleration(percentPerSecond);
 
-  Serial.printf("[MOTOR] Beschleunigung geaendert: %.1f %%/s\n", percentPerSecond);
+  Serial.printf("[MOTOR] Beschleunigung Z geaendert: %.1f %%/s\n", percentPerSecond);
+}
+
+bool ClawMotorController::stopAxisImmediately(char axis)
+{
+  switch (axis) {
+    case 'X':
+      currentX = 0;
+      xMotorLeft.stopImmediately();
+      xMotorRight.stopImmediately();
+      break;
+    case 'Y':
+      currentY = 0;
+      yMotor.stopImmediately();
+      break;
+    case 'Z':
+      zMotor.stopImmediately();
+      break;
+    default:
+      Serial.printf("[MOTOR] Unbekannte Achse: %c\n", axis);
+      return false;
+  }
+  Serial.printf("[MOTOR] %c: Sofortstopp\n", axis);
+  return true;
 }
 
 bool ClawMotorController::moveClaw(const char *command)

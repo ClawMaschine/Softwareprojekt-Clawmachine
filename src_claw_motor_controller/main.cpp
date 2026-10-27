@@ -140,7 +140,7 @@ void publishErrorLog(const char *sourceTopic, const String &payload, const Strin
 // Motorbefehl als JSON, z.B. {"X":100,"Y":0,"Z":0,"claw":"open"} — nur die
 // enthaltenen Felder werden angewendet, fehlende Achsen bleiben unveraendert.
 // Zusaetzlich wird das bisherige Textformat akzeptiert ("X:100", "claw:open"),
-// das der Python-Server aktuell sendet.
+// das der Python-Server aktuell sendet, dazu "stop:X" fuer den Sofortstopp einer Achse.
 void applyMotorCommand(const char *topic, const String &message)
 {
   if (message.startsWith("{")) {
@@ -184,6 +184,12 @@ void applyMotorCommand(const char *topic, const String &message)
       return;
     }
     movementController.move(message.charAt(0), (int)speed);
+  } else if (message.startsWith("stop:")) {
+    // "stop:X" - Achse sofort anhalten, ohne Rampe (Endstop, Homing)
+    const String axisText = message.substring(5);
+    if (axisText.length() != 1 || !movementController.stopAxisImmediately(axisText.charAt(0))) {
+      publishErrorLog(topic, message, "Unbekannte Achse beim Sofortstopp");
+    }
   } else if (message.startsWith("claw:")) {
     if (!movementController.moveClaw(message.substring(5).c_str())) {
       publishErrorLog(topic, message, "Unbekannter Klauen-Befehl");
@@ -216,7 +222,8 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
   }
 
   if (strcmp(topic, MOTOR_SETTINGS_TOPIC) == 0) {
-    // JSON-Settings-Update, z.B. {"accelerationPercentPerSecond": 50} oder {"clawSpeedDegreesPerSecond": 35}
+    // JSON-Settings-Update, z.B. {"accelerationPercentPerSecond": 50} (alle Achsen), {"xyAccelerationPercentPerSecond": 50},
+    // {"zAccelerationPercentPerSecond": 50} oder {"clawSpeedDegreesPerSecond": 35}
     JsonDocument jsonDoc;
     DeserializationError error = deserializeJson(jsonDoc, message);
     if (error) {
@@ -229,13 +236,21 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
       movementController.setAcceleration(jsonDoc["accelerationPercentPerSecond"].as<float>());
       hasKnownSetting = true;
     }
+    if (jsonDoc["xyAccelerationPercentPerSecond"].is<float>()) {
+      movementController.setXyAcceleration(jsonDoc["xyAccelerationPercentPerSecond"].as<float>());
+      hasKnownSetting = true;
+    }
+    if (jsonDoc["zAccelerationPercentPerSecond"].is<float>()) {
+      movementController.setZAcceleration(jsonDoc["zAccelerationPercentPerSecond"].as<float>());
+      hasKnownSetting = true;
+    }
     if (jsonDoc["clawSpeedDegreesPerSecond"].is<float>()) {
       movementController.setClawSpeed(jsonDoc["clawSpeedDegreesPerSecond"].as<float>());
       hasKnownSetting = true;
     }
     if (!hasKnownSetting) {
       publishErrorLog(topic, message,
-                      "accelerationPercentPerSecond bzw. clawSpeedDegreesPerSecond fehlt oder ist keine Zahl");
+                      "Keine bekannte Einstellung (accelerationPercentPerSecond, xy/zAccelerationPercentPerSecond, clawSpeedDegreesPerSecond) oder keine Zahl");
     }
   } else if (strcmp(topic, MOTOR_COMMAND_TOPIC) == 0) {
     applyMotorCommand(topic, message);

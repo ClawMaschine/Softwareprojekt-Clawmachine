@@ -57,8 +57,8 @@ Beim Start publiziert der Server außerdem die Homing-Sequenz (`Moving.start_hom
 Ablauf einer Spielereingabe:
 1. Panel oder Joy-Con publiziert den Tastenzustand (JSON) auf `player_input/panel` bzw. `player_input/joycon`.
 2. Server prüft, ob die Quelle freigegeben ist (`input_sources`), führt den Zustand mit dem letzten zusammen
-   und rechnet ihn prozentual in Geschwindigkeiten um: Panel-Tasten zählen als 100 %, Joy-Con-Werte (0–100) werden direkt als Prozent genommen. Die Standard-Geschwindigkeit je Achsengruppe steht in `config.ini` (`[motor_speed]`: `xy_percent`, `z_percent`, `claw_degrees_per_second`, `minimum_percent`). Eine angesteuerte Achse fährt mindestens mit `minimum_percent`, weil Schrittmotoren darunter sichtbar ruckeln.
-3. Alle Fahrbefehle (Panel, Joy-Con, Webinterface, `clawmachine/claw`) laufen über `Moving.move_axis(achse, prozent)`. Dort wird auf die Standard-Geschwindigkeit der Achse skaliert und der Endstop geprüft: Negative Richtung zeigt auf den Endstop der Achse (wie beim Homing); ist er ausgelöst, sendet der Server `0` statt der Fahrt. Löst der Endstop während der Fahrt aus, stoppt der Server die Achse sofort. Eingaben auf einer Achse, die gerade referenziert wird (Homing), werden ignoriert. Gesendet wird nur bei Änderung: `X:<v>`, `Y:<v>`, `Z:<v>` auf `motor_controller/motor/command`.
+   und rechnet ihn prozentual in Geschwindigkeiten um: Panel-Tasten zählen als 100 %, Joy-Con-Werte (0–100) werden direkt als Prozent genommen. Die Standard-Geschwindigkeit je Achsengruppe steht in `config.ini` (`[motor_speed]`: `xy_percent`, `z_percent`, `claw_degrees_per_second`, `minimum_percent`, `xy_accel`, `z_accel`). Eine angesteuerte Achse fährt mindestens mit `minimum_percent`, weil Schrittmotoren darunter sichtbar ruckeln.
+3. Alle Fahrbefehle (Panel, Joy-Con, Webinterface, `clawmachine/claw`) laufen über `Moving.move_axis(achse, prozent)`. Dort wird auf die Standard-Geschwindigkeit der Achse skaliert und der Endstop geprüft: Negative Richtung zeigt auf den Endstop der Achse (wie beim Homing); ist er ausgelöst, sendet der Server `0` statt der Fahrt. Löst der Endstop während der Fahrt aus oder ist das Homing fertig, sendet der Server `stop:<Achse>`: Der Motor-Controller hält die Achse dann sofort an, ohne die Beschleunigungsrampe herunterzufahren. Das Anfahren (auch beim Homing) läuft weiter über die Rampe. Eingaben auf einer Achse, die gerade referenziert wird (Homing), werden ignoriert. Gesendet wird nur bei Änderung: `X:<v>`, `Y:<v>`, `Z:<v>` auf `motor_controller/motor/command`.
 4. Motor-Controller setzt die Achse um.
 
 ## 3. Topic-Liste
@@ -103,8 +103,8 @@ am I2C-Bus antworten, sonst Rollback (`rolled_back`).
 
 | Topic | Von → An | Payload |
 |---|---|---|
-| `clawmachine/motor_controller/motor/command` | Server → Motor-Controller | Text `X:<v>`, `Y:<v>`, `Z:<v>` (Geschwindigkeit, ganzzahlig, negativ = Gegenrichtung, `0` = Stopp) oder `claw:<aktion>` (`claw:open`, `claw:close` oder ein Winkel in Grad, z. B. `claw:120`; die Klaue begrenzt auf 90–160°). Der Motor-Controller akzeptiert zusätzlich JSON, z. B. `{"X":100,"Y":0,"Z":0,"claw":"open"}` (`"claw"` auch als Zahl, Winkel in Grad); nur enthaltene Felder werden angewendet. Der Server sendet bisher das Textformat |
-| `clawmachine/motor_controller/settings` | Server → Motor-Controller | JSON mit einem oder beiden Feldern: `{"accelerationPercentPerSecond": 50.0}` (Fahrmotoren) bzw. `{"clawSpeedDegreesPerSecond": 35.0}` (Klaue, konstante Geschwindigkeit ohne Rampe, Minimum 1) |
+| `clawmachine/motor_controller/motor/command` | Server → Motor-Controller | Text `X:<v>`, `Y:<v>`, `Z:<v>` (Geschwindigkeit, ganzzahlig, negativ = Gegenrichtung, `0` = Stopp) oder `stop:<Achse>` (z. B. `stop:X`, sofortiger Stopp ohne Rampe) oder `claw:<aktion>` (`claw:open`, `claw:close` oder ein Winkel in Grad, z. B. `claw:120`; die Klaue begrenzt auf 90–160°). Der Motor-Controller akzeptiert zusätzlich JSON, z. B. `{"X":100,"Y":0,"Z":0,"claw":"open"}` (`"claw"` auch als Zahl, Winkel in Grad); nur enthaltene Felder werden angewendet. Der Server sendet bisher das Textformat |
+| `clawmachine/motor_controller/settings` | Server → Motor-Controller | JSON mit einem oder mehreren Feldern: `{"accelerationPercentPerSecond": 50.0}` (alle Fahrmotoren), `{"xyAccelerationPercentPerSecond": 50.0}` / `{"zAccelerationPercentPerSecond": 50.0}` (getrennt für X/Y und Z) bzw. `{"clawSpeedDegreesPerSecond": 35.0}` (Klaue, konstante Geschwindigkeit ohne Rampe, Minimum 1) |
 
 ### 3.4 Server ↔ Webinterface
 
@@ -116,7 +116,7 @@ am I2C-Bus antworten, sonst Rollback (`rolled_back`).
 | `clawmachine/web_interface/input_sources` | Server → Webinterface | JSON `{"panel":true,"joycon":true}`, auch ungefragt nach jeder Änderung |
 | `clawmachine/web_interface/input_sources/set` | Webinterface → Server | Text `<quelle>:on` oder `<quelle>:off`, Quelle = `panel` oder `joycon` |
 | `clawmachine/web_interface/speed_settings/request` | Webinterface → Server | leer (Anfrage) |
-| `clawmachine/web_interface/speed_settings` | Server → Webinterface | JSON `{"xyPercent":100,"zPercent":100,"clawDegreesPerSecond":35.0}`, auch ungefragt nach jeder Änderung |
+| `clawmachine/web_interface/speed_settings` | Server → Webinterface | JSON `{"xyPercent":100,"zPercent":100,"clawDegreesPerSecond":35.0,"xyAccelerationPercentPerSecond":50,"zAccelerationPercentPerSecond":50}`, auch ungefragt nach jeder Änderung |
 | `clawmachine/web_interface/endstop` | Server → Webinterface | durchgereichter Endstop-JSON (wie `endstop/state`) |
 
 Das Webinterface abonniert `clawmachine/#` und füllt damit Live-Status und Geräte-Log. Die Geräteliste fragt es zusätzlich zyklisch an.
@@ -128,7 +128,7 @@ Das Webinterface abonniert `clawmachine/#` und füllt damit Live-Status und Ger�
 | `left:<p>` / `right:<p>` | Eingabe in Prozent (-100..100, Vorzeichen = Richtung), vom Server auf die eingestellte XY-Geschwindigkeit skaliert → `motor_controller/motor/command` als `X:<v>` |
 | `front:<p>` / `back:<p>` | wie oben → `Y:<v>` |
 | `claw:<aktion>` | unverändert weitergereicht |
-| `accel:<prozent_pro_s>` | → `motor_controller/settings` als JSON (`accelerationPercentPerSecond`) |
+| `accel:<prozent_pro_s>` / `xy_accel:…` / `z_accel:…` | Beschleunigung in %/s: `accel` für X/Y und Z gemeinsam, die anderen getrennt. Der Server hält die Werte und sendet sie als JSON (`xyAccelerationPercentPerSecond`, `zAccelerationPercentPerSecond`) an `motor_controller/settings`, auch nach einem Neustart des Motor-Controllers |
 | `claw_speed:<grad_pro_s>` | → `motor_controller/settings` als JSON (`clawSpeedDegreesPerSecond`) |
 | `xy_speed:<prozent>` / `z_speed:<prozent>` | setzt die Standard-Geschwindigkeit der Achsen am Server (Prozent der max. Drehzahl, gilt bis zum Serverneustart); antwortet auf `web_interface/speed_settings` |
 

@@ -127,7 +127,7 @@ class ClawMachine:
 
         # Subscriptions muessen vorher stehen, sonst koennten die
         # Endstop-Updates, die die Sequenz voranschalten, nie ankommen.
-        self.publish_claw_speed()
+        self.publish_motor_settings()
         self.move_controller.start_homing_sequence()
 
         self.main_loop_started_at = time.time()
@@ -162,17 +162,21 @@ class ClawMachine:
             registered_topic = device_topic(esp_name, "registered")
             self.mqtt_client.publish(registered_topic, "ok")
             if esp_name == MOTOR_CONTROLLER_DEVICE_NAME:
-                self.publish_claw_speed()
+                self.publish_motor_settings()
         return device
 
-    def publish_claw_speed(self):
-        # Die Klauen-Geschwindigkeit liegt als Setting auf dem Motor-Controller
-        # (Grad pro Sekunde) und geht verloren, wenn dieser neu startet — deshalb
-        # beim Serverstart und bei jeder (Neu-)Registrierung erneut senden.
+    def publish_motor_settings(self):
+        # Klauen-Geschwindigkeit und Beschleunigungen liegen als Settings auf dem
+        # Motor-Controller und gehen verloren, wenn dieser neu startet — deshalb beim
+        # Serverstart und bei jeder (Neu-)Registrierung erneut senden.
         self.mqtt_client.publish(
             MOTOR_CONTROLLER_SETTINGS_TOPIC,
             json.dumps(
-                {"clawSpeedDegreesPerSecond": self.claw_speed_degrees_per_second}
+                {
+                    "clawSpeedDegreesPerSecond": self.claw_speed_degrees_per_second,
+                    "xyAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second("X"),
+                    "zAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second("Z"),
+                }
             ),
         )
 
@@ -186,6 +190,8 @@ class ClawMachine:
                     "xyPercent": self.move_controller.max_speed_percent("X"),
                     "zPercent": self.move_controller.max_speed_percent("Z"),
                     "clawDegreesPerSecond": self.claw_speed_degrees_per_second,
+                    "xyAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second("X"),
+                    "zAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second("Z"),
                 }
             ),
         )
@@ -387,19 +393,21 @@ class ClawMachine:
                         "X" if name == "xy_speed" else "Z", speed_percent
                     )
                     self.publish_speed_settings()
-                elif name == "accel":
-                    # Eigenes Settings-Topic statt Bewegungsbefehl — der
-                    # Motor-Controller erwartet hier JSON, siehe
-                    # onMqttMessage() in src_claw_motor_controller/main.cpp.
+                elif name in ("accel", "xy_accel", "z_accel"):
+                    # Beschleunigung in %/s. "accel" gilt fuer alle Achsen (aelterer Befehl),
+                    # xy_accel/z_accel getrennt. Die Werte werden am Server gehalten, damit
+                    # sie nach einem Neustart des Motor-Controllers erneut gesendet werden.
                     try:
-                        acceleration = float(value)
+                        acceleration = int(float(value))
                     except ValueError:
                         print(f"Invalid acceleration value: {value}")
                         return
-                    self.mqtt_client.publish(
-                        MOTOR_CONTROLLER_SETTINGS_TOPIC,
-                        json.dumps({"accelerationPercentPerSecond": acceleration}),
-                    )
+                    if name in ("accel", "xy_accel"):
+                        self.move_controller.set_acceleration("X", acceleration)
+                    if name in ("accel", "z_accel"):
+                        self.move_controller.set_acceleration("Z", acceleration)
+                    self.publish_motor_settings()
+                    self.publish_speed_settings()
                 elif name == "claw_speed":
                     # Fahrgeschwindigkeit der Klaue in Grad/s, ebenfalls ein
                     # Settings-JSON (siehe "accel" oben). Wird gemerkt, damit sie
@@ -409,7 +417,7 @@ class ClawMachine:
                     except ValueError:
                         print(f"Invalid claw speed value: {value}")
                         return
-                    self.publish_claw_speed()
+                    self.publish_motor_settings()
                     self.publish_speed_settings()
                 else:
                     print(f"Unknown webinterface command: {payload_text}")

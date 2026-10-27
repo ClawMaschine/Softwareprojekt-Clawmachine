@@ -11,6 +11,9 @@ public:
 
   void begin();
   void setSpeed(int speedPercent);
+  // Haelt den Motor sofort an, ohne die Beschleunigungsrampe herunterzufahren
+  // (z.B. am Endstop). Das Anfahren bleibt davon unberuehrt und laeuft weiter ueber die Rampe.
+  void stopImmediately();
 
   // Wie schnell sich die tatsächliche Geschwindigkeit pro Sekunde Richtung
   // Zielgeschwindigkeit bewegen darf, in Prozentpunkten/Sekunde (z.B. 200

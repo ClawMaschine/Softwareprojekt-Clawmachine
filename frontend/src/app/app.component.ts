@@ -40,9 +40,10 @@ export class AppComponent implements OnInit, OnDestroy {
   xySpeedPercent = 100;
   zSpeedPercent = 100;
 
-  // Gleicher Default wie CLAW_MOTOR_ACCELERATION_PERCENT_PER_SECOND in
-  // firmware_config.h — Prozentpunkte Geschwindigkeit pro Sekunde.
-  accelerationPercentPerSecond = 50;
+  // Beschleunigung in Prozentpunkten Geschwindigkeit pro Sekunde, getrennt für X/Y
+  // und Z (xy_accel/z_accel in config.ini). Werte kommen vom Server über speedSettings$.
+  xyAccelerationPercentPerSecond = 50;
+  zAccelerationPercentPerSecond = 50;
 
   // Gleicher Default wie DEFAULT_SPEED_DEGREES_PER_SECOND in claw_servo_motor.h —
   // Fahrgeschwindigkeit der Klaue in Grad pro Sekunde.
@@ -74,6 +75,8 @@ export class AppComponent implements OnInit, OnDestroy {
           this.xySpeedPercent = settings.xyPercent;
           this.zSpeedPercent = settings.zPercent;
           this.clawSpeedDegreesPerSecond = settings.clawDegreesPerSecond;
+          this.xyAccelerationPercentPerSecond = settings.xyAccelerationPercentPerSecond;
+          this.zAccelerationPercentPerSecond = settings.zAccelerationPercentPerSecond;
         }
       }),
       // Trigger change detection every second to refresh uptime displays
@@ -160,8 +163,12 @@ export class AppComponent implements OnInit, OnDestroy {
     this.mqttService.publishCommand(`claw:${this.clawAngleDegrees}`);
   }
 
-  sendAcceleration(): void {
-    this.mqttService.publishCommand(`accel:${this.accelerationPercentPerSecond}`);
+  sendXyAcceleration(): void {
+    this.mqttService.publishCommand(`xy_accel:${this.xyAccelerationPercentPerSecond}`);
+  }
+
+  sendZAcceleration(): void {
+    this.mqttService.publishCommand(`z_accel:${this.zAccelerationPercentPerSecond}`);
   }
 
   sendXySpeed(): void {
