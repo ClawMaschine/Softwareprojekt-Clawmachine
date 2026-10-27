@@ -343,30 +343,17 @@ class ClawMachine:
                 self.panel_button_state.update(panel_buttons)
 
                 # Gegenueberliegende Richtungen ergeben die Differenz (-100..100,
-                # Vorzeichen = Richtung) und werden dann prozentual auf die in
-                # config.ini eingestellte Standard-Geschwindigkeit der Achse skaliert.
+                # Vorzeichen = Richtung). Skalierung auf die Standard-Geschwindigkeit
+                # und Endstop-Pruefung passieren in Moving.move_axis().
                 state = self.panel_button_state
-                x_speed = self.move_controller.scale_speed(
+                self.move_controller.move_axis(
                     "X", state.get("right", 0) - state.get("left", 0)
                 )
-                y_speed = self.move_controller.scale_speed(
+                self.move_controller.move_axis(
                     "Y", state.get("back", 0) - state.get("front", 0)
                 )
-                z_speed = self.move_controller.scale_speed(
+                self.move_controller.move_axis(
                     "Z", state.get("up", 0) - state.get("down", 0)
-                )
-
-                json_payload = json.dumps(
-                    {
-                        "X": x_speed,
-                        "Y": y_speed,
-                        "Z": z_speed,
-                    }
-                )
-
-                print(json_payload)
-                self.mqtt_client.publish(
-                    MOTOR_CONTROLLER_COMMAND_TOPIC, f"{json_payload}"
                 )
             # 6) Steuerbefehl vom Webinterface (z.B. "left:80", "front:-80",
             #    "claw:open") — das Webinterface rechnet die Geschwindigkeit
@@ -381,17 +368,14 @@ class ClawMachine:
                     )
                 elif name in ("left", "right", "front", "back"):
                     # value = Eingabe in Prozent (-100..100, Vorzeichen = Richtung) —
-                    # der Server skaliert sie auf die eingestellte XY-Geschwindigkeit.
+                    # Skalierung und Endstop-Pruefung macht Moving.move_axis().
                     try:
                         input_percent = float(value)
                     except ValueError:
                         print(f"Invalid movement value: {payload_text}")
                         return
                     axis = "X" if name in ("left", "right") else "Y"
-                    self.mqtt_client.publish(
-                        MOTOR_CONTROLLER_COMMAND_TOPIC,
-                        f"{axis}:{self.move_controller.scale_speed(axis, input_percent)}",
-                    )
+                    self.move_controller.move_axis(axis, input_percent)
                 elif name in ("xy_speed", "z_speed"):
                     # Standard-Geschwindigkeit der Achsen in Prozent der max. Drehzahl
                     try:

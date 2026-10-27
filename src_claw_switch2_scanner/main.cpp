@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <NimBLEDevice.h>
 
 // Fuer die gespeicherte Kopplung wird der NimBLE-Host direkt angesprochen:
@@ -240,9 +241,12 @@ static constexpr uint8_t JOYCON_RIGHT_A_BUTTON_MASK = 0x02;
 // Darueber wird die Auslenkung auf 0-100 % umgerechnet (Schwelle = 0 %, Anschlag
 // = 100 %), damit die Geschwindigkeit weich einsetzt.
 static constexpr int8_t JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT = 30;
-// Werte werden auf Vielfache davon gerundet, damit nicht jede kleine
-// Stickbewegung eine MQTT-Nachricht ausloest.
-static constexpr uint8_t JOYCON_PERCENT_STEP = 5;
+// Werte werden auf Vielfache davon gerundet. 1 = volle Aufloesung; die Anzahl der
+// MQTT-Nachrichten begrenzt JOYCON_MINIMUM_PUBLISH_INTERVAL_MILLISECONDS.
+static constexpr uint8_t JOYCON_PERCENT_STEP = 1;
+// Aenderungen innerhalb der Bewegung (Wert bleibt > 0) werden hoechstens so oft
+// gesendet. Start und Stopp einer Richtung gehen immer sofort raus.
+static constexpr unsigned long JOYCON_MINIMUM_PUBLISH_INTERVAL_MILLISECONDS = 40;
 // Tasten zaehlen als voll gedrueckt.
 static constexpr uint8_t JOYCON_BUTTON_PRESSED_PERCENT = 100;
 
@@ -269,6 +273,17 @@ struct JoyConControlState
     if (frontPercent > 0 && backPercent > 0) return false;
     if (upPercent > 0 && downPercent > 0)    return false;
     return true;
+  }
+
+  // true, wenn mindestens eine Richtung von/auf 0 wechselt (Start/Stopp).
+  bool hasStartOrStopComparedTo(const JoyConControlState &other) const
+  {
+    return (upPercent == 0) != (other.upPercent == 0) ||
+           (downPercent == 0) != (other.downPercent == 0) ||
+           (leftPercent == 0) != (other.leftPercent == 0) ||
+           (rightPercent == 0) != (other.rightPercent == 0) ||
+           (frontPercent == 0) != (other.frontPercent == 0) ||
+           (backPercent == 0) != (other.backPercent == 0);
   }
 
   bool equals(const JoyConControlState &other) const
@@ -712,24 +727,25 @@ static bool sendControllerCommand(ControllerSession *session,
 // pendingConnectAddress und hasPendingControlState. Ein GATT-Write aus dem
 // Host-Task heraus kann den Stack blockieren, der auf genau diesen Task
 // wartet.
-static volatile bool         hasPendingVibration = false;
-static Switch2ControllerType pendingVibrationType = Switch2ControllerType::Unknown;
+// Je Joy-Con ein eigener Merker, damit auch beide gleichzeitig vibrieren koennen
+// (z.B. bei einem Endstop).
+static volatile bool hasPendingLeftVibration  = false;
+static volatile bool hasPendingRightVibration = false;
 
 static void requestVibration(Switch2ControllerType type)
 {
-  pendingVibrationType = type;
-  hasPendingVibration  = true;
+  if (type == Switch2ControllerType::JoyConLeft)
+  {
+    hasPendingLeftVibration = true;
+  }
+  else if (type == Switch2ControllerType::JoyConRight)
+  {
+    hasPendingRightVibration = true;
+  }
 }
 
-static void sendPendingVibration()
+static void sendVibration(Switch2ControllerType type)
 {
-  if (!hasPendingVibration)
-  {
-    return;
-  }
-  const Switch2ControllerType type = pendingVibrationType;
-  hasPendingVibration             = false;
-
   ControllerSession *session = findSessionByType(type);
   if (session == nullptr || session->commandCharacteristic == nullptr)
   {
@@ -758,6 +774,20 @@ static void sendPendingVibration()
                 VIBRATION_SAMPLE_FOR_BUTTON_FEEDBACK,
                 controllerName,
                 didWrite ? "gesendet" : "FEHLGESCHLAGEN");
+}
+
+static void sendPendingVibration()
+{
+  if (hasPendingLeftVibration)
+  {
+    hasPendingLeftVibration = false;
+    sendVibration(Switch2ControllerType::JoyConLeft);
+  }
+  if (hasPendingRightVibration)
+  {
+    hasPendingRightVibration = false;
+    sendVibration(Switch2ControllerType::JoyConRight);
+  }
 }
 
 // --- Gespeicherte Kopplungen ------------------------------------------------
@@ -1361,6 +1391,20 @@ static void publishPendingControlState()
     return;
   }
 
+  // Reine Wertaenderung innerhalb einer Bewegung: nicht oefter als im Mindest-
+  // abstand senden. Der Zustand bleibt vorgemerkt und geht beim naechsten
+  // loop()-Durchlauf nach Ablauf des Abstands raus; der letzte Wert kommt so
+  // immer an.
+  static unsigned long lastPublishedAtMilliseconds = 0;
+  const unsigned long  nowMilliseconds             = millis();
+  if (hasPublishedOnce && !state.hasStartOrStopComparedTo(lastPublishedState) &&
+      nowMilliseconds - lastPublishedAtMilliseconds < JOYCON_MINIMUM_PUBLISH_INTERVAL_MILLISECONDS)
+  {
+    hasPendingControlState = true;
+    return;
+  }
+  lastPublishedAtMilliseconds = nowMilliseconds;
+
   char payload[160];
   snprintf(payload, sizeof(payload),
            "{\"up\":%d,\"down\":%d,\"left\":%d,\"right\":%d,\"front\":%d,\"back\":%d}",
@@ -1959,6 +2003,58 @@ static void handleSerialCommands()
 
 // --- Setup / Loop -----------------------------------------------------------
 
+// --- Endstop-Rueckmeldung ---------------------------------------------------
+//
+// Das Endstop-Board (src_claw_endstop) meldet bei jeder Aenderung
+// {"x1":0,"x2":0,"y1":0,"y2":0,"z1":0}, 1 = ausgeloest. Beim Ausloesen eines
+// Endstops (0 -> 1) vibrieren beide Joy-Cons. Der Callback laeuft im Arduino-Task
+// (maintainConnection), gesendet wird trotzdem erst in sendPendingVibration().
+static constexpr const char *ENDSTOP_STATE_TOPIC = "clawmachine/endstop/state";
+static constexpr const char *ENDSTOP_FIELD_NAMES[] = {"x1", "x2", "y1", "y2", "z1"};
+static constexpr size_t      ENDSTOP_FIELD_COUNT   = sizeof(ENDSTOP_FIELD_NAMES) / sizeof(ENDSTOP_FIELD_NAMES[0]);
+
+static void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
+{
+  if (strcmp(topic, ENDSTOP_STATE_TOPIC) != 0)
+  {
+    return;
+  }
+
+  JsonDocument jsonDocument;
+  if (deserializeJson(jsonDocument, payload, length))
+  {
+    return;
+  }
+
+  static bool hasEndstopBeenTriggered[ENDSTOP_FIELD_COUNT] = {};
+  // Die erste Meldung nach dem Start setzt nur den Ausgangszustand: ein schon
+  // gedrueckter Endstop soll nicht beim Verbinden vibrieren.
+  static bool hasReceivedFirstState = false;
+
+  bool hasNewlyTriggeredEndstop = false;
+  for (size_t i = 0; i < ENDSTOP_FIELD_COUNT; i++)
+  {
+    if (jsonDocument[ENDSTOP_FIELD_NAMES[i]].isNull())
+    {
+      continue;
+    }
+    const bool isTriggered = jsonDocument[ENDSTOP_FIELD_NAMES[i]].as<int>() == 1;
+    if (isTriggered && !hasEndstopBeenTriggered[i])
+    {
+      hasNewlyTriggeredEndstop = true;
+      Serial.printf("[ENDSTOP] %s ausgeloest\n", ENDSTOP_FIELD_NAMES[i]);
+    }
+    hasEndstopBeenTriggered[i] = isTriggered;
+  }
+
+  if (hasNewlyTriggeredEndstop && hasReceivedFirstState)
+  {
+    requestVibration(Switch2ControllerType::JoyConLeft);
+    requestVibration(Switch2ControllerType::JoyConRight);
+  }
+  hasReceivedFirstState = true;
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -1970,7 +2066,9 @@ void setup()
 
   Serial.printf("[MQTT]  Broker %s:%d, Topic %s\n",
                 CLAW_MQTT_BROKER_HOST, CLAW_MQTT_BROKER_PORT, JOYCON_CONTROL_TOPIC);
+  mqttConnection.setMessageCallback(onMqttMessage);
   mqttConnection.begin();
+  mqttConnection.subscribe(ENDSTOP_STATE_TOPIC);
 
   NimBLEDevice::init("");
   // Ohne die eigene Adresse laesst sich nicht beurteilen, ob ein

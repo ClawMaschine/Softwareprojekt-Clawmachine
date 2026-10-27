@@ -36,6 +36,10 @@ class Moving:
         self.mqtt_client = mqtt_client
         self.motor_speed_configuration = motor_speed_configuration
         self.homing_in_progress = {"X": False, "Y": False, "Z": False}
+        # Zuletzt an den Motor-Controller gesendete Geschwindigkeit je Achse — damit
+        # eine Achse sofort gestoppt werden kann, wenn waehrend der Fahrt ihr Endstop
+        # ausloest.
+        self.commanded_speed = {"X": 0, "Y": 0, "Z": 0}
 
     def update_endstop_status(self, endstop_state: dict):
         # Wird von claw_machine.py bei jeder Nachricht auf ENDSTOP_TOPIC
@@ -50,11 +54,19 @@ class Moving:
             self.endstop_status[axis] = 0 if is_triggered else 1
             if is_triggered and self.homing_in_progress.get(axis):
                 self.__finish_homing(axis)
+            elif is_triggered and self.commanded_speed[axis] < 0:
+                # Achse faehrt gerade auf ihren Endstop zu: sofort stoppen
+                print(f"[MOVING] Endstop {axis} ausgeloest — Achse gestoppt")
+                self.__send_axis_speed(axis, 0)
+
+    def __send_axis_speed(self, axis, speed: int):
+        self.commanded_speed[axis] = speed
+        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"{axis}:{speed}")
 
     def __finish_homing(self, axis):
         self.homing_in_progress[axis] = False
         self.position[axis] = 0
-        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"{axis}:0")
+        self.__send_axis_speed(axis, 0)
         print(f"[MOVING] Homing {axis} abgeschlossen")
 
         next_index = HOMING_SEQUENCE.index(axis) + 1
@@ -71,9 +83,7 @@ class Moving:
 
         print(f"[MOVING] Starte Homing fuer Achse {axis}")
         self.homing_in_progress[axis] = True
-        self.mqtt_client.publish(
-            MOTOR_CONTROLLER_COMMAND_TOPIC, f"{axis}:{-HOMING_SPEED}"
-        )
+        self.__send_axis_speed(axis, -HOMING_SPEED)
         return True
 
     def __endstop_reached(self, axis):
@@ -102,22 +112,33 @@ class Moving:
         # Standard-Geschwindigkeit der Achse umrechnen.
         return round(self.max_speed_percent(axis) * input_percent / 100)
 
-    def move_axis(self, axis, speed: int):
-        # speed = Eingabe in Prozent (-100..100, Vorzeichen = Richtung), wird auf die
-        # Standard-Geschwindigkeit der Achse skaliert.
-        print(f"[MOVING] Bewegung der Achse {axis} mit Geschwindigkeit {speed}")
-        if self.__endstop_reached(axis):
-            print(f"[MOVING] Bewegung der Achse {axis} abgebrochen — Endstop erreicht")
+    def move_axis(self, axis, speed: float):
+        # Einziger Weg, auf dem Fahrbefehle zum Motor-Controller gehen (Panel, Joy-Con,
+        # Webinterface, clawmachine/claw). speed = Eingabe in Prozent (-100..100,
+        # Vorzeichen = Richtung), wird auf die Standard-Geschwindigkeit der Achse
+        # skaliert. Negative Richtung = auf den Endstop der Achse zu (wie beim Homing).
+        if axis not in ("X", "Y", "Z"):
+            print(f"[MOVING] Unbekannte Achse: {axis}")
             return False
+        if self.homing_in_progress.get(axis):
+            # Das Homing hat Vorrang; Eingaben auf dieser Achse wuerden es stoeren.
+            return False
+
+        scaled_speed = self.scale_speed(axis, speed)
+        if scaled_speed < 0 and self.__endstop_reached(axis):
+            # Statt nur abzubrechen explizit 0 senden: sonst liefe die Achse mit der
+            # vorigen Geschwindigkeit weiter.
+            print(f"[MOVING] Bewegung der Achse {axis} blockiert — Endstop erreicht")
+            scaled_speed = 0
+
+        # Nur bei Aenderung senden (Panel/Joy-Con melden auch bei Aenderungen anderer Achsen)
+        if scaled_speed == self.commanded_speed[axis]:
+            return True
+        print(f"[MOVING] Bewegung der Achse {axis} mit Geschwindigkeit {scaled_speed}")
 
         # Position wird hier erstmal nur grob mitgezaehlt (kein echtes
         # Weg-Zeit-Modell) — der Motor-Controller-ESP bekommt ausschliesslich
         # die Geschwindigkeit und macht selbst keine Positionsberechnung.
-        if axis not in ("X", "Y", "Z"):
-            print(f"[MOVING] Unbekannte Achse: {axis}")
-            return False
-        scaled_speed = self.scale_speed(axis, speed)
         self.position[axis] += scaled_speed
-        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"{axis}:{scaled_speed}")
-
+        self.__send_axis_speed(axis, scaled_speed)
         return True
