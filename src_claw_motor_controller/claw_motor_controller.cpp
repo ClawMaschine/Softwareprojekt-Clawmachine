@@ -108,8 +108,14 @@ bool ClawMotorController::moveClaw(const char *command)
     clawServo.close();
     Serial.println("[MOTOR] Klaue: close");
   } else {
-    Serial.printf("[MOTOR] Klaue: unbekannter Befehl: %s\n", command);
-    return false;
+    // Winkel in Grad als Zahl, z.B. "120"; ClawServoMotor begrenzt auf den erlaubten Bereich
+    char *angleEnd = nullptr;
+    const long angleDegrees = strtol(command, &angleEnd, 10);
+    if (command[0] == '\0' || *angleEnd != '\0') {
+      Serial.printf("[MOTOR] Klaue: unbekannter Befehl: %s\n", command);
+      return false;
+    }
+    clawServo.setAngle(static_cast<uint8_t>(constrain(angleDegrees, 0L, 255L)));
   }
   return true;
 }

@@ -164,7 +164,7 @@ void applyMotorCommand(const char *topic, const String &message)
     }
     if (!jsonDoc["claw"].isNull()) {
       JsonVariantConst clawValue = jsonDoc["claw"];
-      // "open"/"close" oder eine Zahl 0-180 (Grad)
+      // "open"/"close" oder ein Winkel in Grad (wird auf den Fahrbereich der Klaue begrenzt)
       String clawCommand = clawValue.is<const char *>() ? String(clawValue.as<const char *>())
                          : clawValue.is<int>()          ? String(clawValue.as<int>())
                                                         : String("");
