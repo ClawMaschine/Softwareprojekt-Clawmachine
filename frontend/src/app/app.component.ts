@@ -43,6 +43,10 @@ export class AppComponent implements OnInit, OnDestroy {
   // firmware_config.h — Prozentpunkte Geschwindigkeit pro Sekunde.
   accelerationPercentPerSecond = 50;
 
+  // Gleicher Default wie DEFAULT_SPEED_DEGREES_PER_SECOND in claw_servo_motor.h —
+  // Fahrgeschwindigkeit der Klaue in Grad pro Sekunde.
+  clawSpeedDegreesPerSecond = 35;
+
   private subs: Subscription[] = [];
 
   constructor(readonly mqttService: MqttService) {}
@@ -125,6 +129,10 @@ export class AppComponent implements OnInit, OnDestroy {
 
   sendAcceleration(): void {
     this.mqttService.publishCommand(`accel:${this.accelerationPercentPerSecond}`);
+  }
+
+  sendClawSpeed(): void {
+    this.mqttService.publishCommand(`claw_speed:${this.clawSpeedDegreesPerSecond}`);
   }
 
   onToggleInputSource(event: InputSourceToggleEvent): void {

@@ -11,9 +11,13 @@ public:
   void begin();
   void open();
   void close();
-  // Freie Position in Grad, begrenzt auf den erlaubten Fahrbereich der Klaue
-  // (MIN_/MAX_ALLOWED_ANGLE_DEGREES), zum Testen/Feinjustieren.
+  // Zielposition in Grad, begrenzt auf den erlaubten Fahrbereich der Klaue
+  // (MIN_/MAX_ALLOWED_ANGLE_DEGREES). Die Klaue faehrt mit der eingestellten
+  // Geschwindigkeit dorthin; dazu muss update() regelmaessig aufgerufen werden.
   void setAngle(uint8_t angleDegrees);
+  // Konstante Fahrgeschwindigkeit in Grad pro Sekunde (keine Beschleunigungsrampe).
+  void setSpeed(float degreesPerSecond);
+  void update();
 
   // Fahrbereich, den die Klaue mechanisch nutzen darf (am Aufbau ermittelt mit
   // src_esp_test). Winkel ausserhalb werden abgeschnitten.
@@ -26,6 +30,16 @@ private:
   static const int SERVO_PERIOD_HERTZ = 50;
   static const int SERVO_MIN_PULSE_MICROSECONDS = 700;
   static const int SERVO_MAX_PULSE_MICROSECONDS = 2300;
+
+  static constexpr float DEFAULT_SPEED_DEGREES_PER_SECOND = 35.0f;
+  static constexpr float MIN_SPEED_DEGREES_PER_SECOND = 1.0f;
+
+  void writeAngle(float angleDegrees);
+
+  float currentAngleDegrees;
+  float targetAngleDegrees;
+  float speedDegreesPerSecond = DEFAULT_SPEED_DEGREES_PER_SECOND;
+  unsigned long lastUpdateMicroseconds = 0;
 
   Servo servo;
   uint8_t servoPin;

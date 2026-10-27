@@ -24,6 +24,8 @@ public:
   bool move(char axis, int speed);
   bool moveClaw(const char *command);
   void setAcceleration(float percentPerSecond);
+  // Fahrgeschwindigkeit der Klaue in Grad pro Sekunde (konstant, ohne Rampe)
+  void setClawSpeed(float degreesPerSecond);
 
 private:
 

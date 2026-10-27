@@ -345,6 +345,18 @@ class ClawMachine:
                         MOTOR_CONTROLLER_SETTINGS_TOPIC,
                         json.dumps({"accelerationPercentPerSecond": acceleration}),
                     )
+                elif name == "claw_speed":
+                    # Fahrgeschwindigkeit der Klaue in Grad/s, ebenfalls ein
+                    # Settings-JSON (siehe "accel" oben).
+                    try:
+                        claw_speed = float(value)
+                    except ValueError:
+                        print(f"Invalid claw speed value: {value}")
+                        return
+                    self.mqtt_client.publish(
+                        MOTOR_CONTROLLER_SETTINGS_TOPIC,
+                        json.dumps({"clawSpeedDegreesPerSecond": claw_speed}),
+                    )
                 else:
                     print(f"Unknown webinterface command: {payload_text}")
 

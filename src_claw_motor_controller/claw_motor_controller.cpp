@@ -57,6 +57,7 @@ void ClawMotorController::update()
   yMotor.update();
   xMotorRight.update();
   zMotor.update();
+  clawServo.update();
 }
 
 
@@ -85,6 +86,11 @@ bool ClawMotorController::move(char axis, int speed)
       return false;
   }
   return true;
+}
+
+void ClawMotorController::setClawSpeed(float degreesPerSecond)
+{
+  clawServo.setSpeed(degreesPerSecond);
 }
 
 void ClawMotorController::setAcceleration(float percentPerSecond)

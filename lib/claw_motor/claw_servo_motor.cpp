@@ -1,7 +1,13 @@
 #include "claw_servo_motor.h"
 
+#include <math.h>
+
 ClawServoMotor::ClawServoMotor(uint8_t servoPin, uint8_t openAngleDegrees, uint8_t closedAngleDegrees)
-    : servoPin(servoPin), openAngleDegrees(openAngleDegrees), closedAngleDegrees(closedAngleDegrees)
+    : currentAngleDegrees(openAngleDegrees),
+      targetAngleDegrees(openAngleDegrees),
+      servoPin(servoPin),
+      openAngleDegrees(openAngleDegrees),
+      closedAngleDegrees(closedAngleDegrees)
 {
 }
 
@@ -27,7 +33,48 @@ void ClawServoMotor::begin()
   } else {
     Serial.printf("[SERVO] GPIO %u, LEDC-Kanal %d, %d-%d us, %d Hz\n", servoPin, attachedChannel,
                   SERVO_MIN_PULSE_MICROSECONDS, SERVO_MAX_PULSE_MICROSECONDS, SERVO_PERIOD_HERTZ);
+    // Startposition = "offen", damit currentAngleDegrees zur Hardware passt
+    writeAngle(currentAngleDegrees);
+    lastUpdateMicroseconds = micros();
   }
+}
+
+// Pulsbreite direkt aus dem Winkel (0-180 Grad = Min-Max-Pulsbreite) in
+// Mikrosekunden statt ganzer Grad, damit langsame Fahrten nicht in Stufen laufen.
+void ClawServoMotor::writeAngle(float angleDegrees)
+{
+  const float pulseMicroseconds =
+      SERVO_MIN_PULSE_MICROSECONDS +
+      angleDegrees / 180.0f * (SERVO_MAX_PULSE_MICROSECONDS - SERVO_MIN_PULSE_MICROSECONDS);
+  servo.writeMicroseconds(static_cast<int>(roundf(pulseMicroseconds)));
+}
+
+void ClawServoMotor::setSpeed(float degreesPerSecond)
+{
+  speedDegreesPerSecond = max(degreesPerSecond, MIN_SPEED_DEGREES_PER_SECOND);
+  Serial.printf("[SERVO] Geschwindigkeit: %.1f Grad/s\n", speedDegreesPerSecond);
+}
+
+void ClawServoMotor::update()
+{
+  if (!servo.attached()) {
+    return;
+  }
+  const unsigned long nowMicroseconds = micros();
+  const float elapsedSeconds = (nowMicroseconds - lastUpdateMicroseconds) / 1000000.0f;
+  lastUpdateMicroseconds = nowMicroseconds;
+
+  if (currentAngleDegrees == targetAngleDegrees) {
+    return;
+  }
+  const float remainingDegrees = targetAngleDegrees - currentAngleDegrees;
+  const float maxStepDegrees = speedDegreesPerSecond * elapsedSeconds;
+  if (fabsf(remainingDegrees) <= maxStepDegrees) {
+    currentAngleDegrees = targetAngleDegrees;
+  } else {
+    currentAngleDegrees += (remainingDegrees > 0.0f ? maxStepDegrees : -maxStepDegrees);
+  }
+  writeAngle(currentAngleDegrees);
 }
 
 void ClawServoMotor::setAngle(uint8_t angleDegrees)
@@ -37,8 +84,8 @@ void ClawServoMotor::setAngle(uint8_t angleDegrees)
     Serial.println("[SERVO] FEHLER: Servo nicht angehaengt, Befehl ignoriert");
     return;
   }
-  servo.write(angleDegrees);
-  Serial.printf("[SERVO] -> %u Grad\n", angleDegrees);
+  targetAngleDegrees = angleDegrees;
+  Serial.printf("[SERVO] Zielwinkel: %u Grad\n", angleDegrees);
 }
 
 void ClawServoMotor::open()

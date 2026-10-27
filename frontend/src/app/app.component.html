@@ -122,6 +122,24 @@
           (click)="sendAcceleration()"
         >Setzen</button>
       </div>
+      <div class="accel-controls">
+        <label class="accel-label" for="claw-speed-input">Klaue Geschwindigkeit (°/s)</label>
+        <input
+          id="claw-speed-input"
+          class="accel-input"
+          type="number"
+          min="1"
+          max="180"
+          step="1"
+          [(ngModel)]="clawSpeedDegreesPerSecond"
+          [disabled]="connectionStatus !== 'connected'"
+        />
+        <button
+          class="btn btn-claw"
+          [disabled]="connectionStatus !== 'connected'"
+          (click)="sendClawSpeed()"
+        >Setzen</button>
+      </div>
     </div>
   </section>
 

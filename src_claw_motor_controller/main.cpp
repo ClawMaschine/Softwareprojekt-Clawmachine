@@ -210,7 +210,7 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
   }
 
   if (strcmp(topic, MOTOR_SETTINGS_TOPIC) == 0) {
-    // JSON-Settings-Update, z.B. {"accelerationPercentPerSecond": 50}
+    // JSON-Settings-Update, z.B. {"accelerationPercentPerSecond": 50} oder {"clawSpeedDegreesPerSecond": 35}
     JsonDocument jsonDoc;
     DeserializationError error = deserializeJson(jsonDoc, message);
     if (error) {
@@ -218,11 +218,18 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
       return;
     }
 
+    bool hasKnownSetting = false;
     if (jsonDoc["accelerationPercentPerSecond"].is<float>()) {
-      float newAcceleration = jsonDoc["accelerationPercentPerSecond"].as<float>();
-      movementController.setAcceleration(newAcceleration);
-    } else {
-      publishErrorLog(topic, message, "accelerationPercentPerSecond fehlt oder ist keine Zahl");
+      movementController.setAcceleration(jsonDoc["accelerationPercentPerSecond"].as<float>());
+      hasKnownSetting = true;
+    }
+    if (jsonDoc["clawSpeedDegreesPerSecond"].is<float>()) {
+      movementController.setClawSpeed(jsonDoc["clawSpeedDegreesPerSecond"].as<float>());
+      hasKnownSetting = true;
+    }
+    if (!hasKnownSetting) {
+      publishErrorLog(topic, message,
+                      "accelerationPercentPerSecond bzw. clawSpeedDegreesPerSecond fehlt oder ist keine Zahl");
     }
   } else if (strcmp(topic, MOTOR_COMMAND_TOPIC) == 0) {
     applyMotorCommand(topic, message);

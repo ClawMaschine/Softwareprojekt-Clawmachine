@@ -104,7 +104,7 @@ am I2C-Bus antworten, sonst Rollback (`rolled_back`).
 | Topic | Von → An | Payload |
 |---|---|---|
 | `clawmachine/motor_controller/motor/command` | Server → Motor-Controller | Text `X:<v>`, `Y:<v>`, `Z:<v>` (Geschwindigkeit, ganzzahlig, negativ = Gegenrichtung, `0` = Stopp) oder `claw:<aktion>` (`claw:open`, `claw:close` oder ein Winkel in Grad, z. B. `claw:120`; die Klaue begrenzt auf 90–160°). Der Motor-Controller akzeptiert zusätzlich JSON, z. B. `{"X":100,"Y":0,"Z":0,"claw":"open"}` (`"claw"` auch als Zahl, Winkel in Grad); nur enthaltene Felder werden angewendet. Der Server sendet bisher das Textformat |
-| `clawmachine/motor_controller/settings` | Server → Motor-Controller | JSON `{"accelerationPercentPerSecond": 50.0}` |
+| `clawmachine/motor_controller/settings` | Server → Motor-Controller | JSON mit einem oder beiden Feldern: `{"accelerationPercentPerSecond": 50.0}` (Fahrmotoren) bzw. `{"clawSpeedDegreesPerSecond": 35.0}` (Klaue, konstante Geschwindigkeit ohne Rampe, Minimum 1) |
 
 ### 3.4 Server ↔ Webinterface
 
@@ -126,7 +126,8 @@ Das Webinterface abonniert `clawmachine/#` und füllt damit Live-Status und Ger�
 | `left:<v>` / `right:<v>` | → `motor_controller/motor/command` als `X:<v>` (Vorzeichen kommt vom Webinterface) |
 | `front:<v>` / `back:<v>` | → `Y:<v>` |
 | `claw:<aktion>` | unverändert weitergereicht |
-| `accel:<prozent_pro_s>` | → `motor_controller/settings` als JSON |
+| `accel:<prozent_pro_s>` | → `motor_controller/settings` als JSON (`accelerationPercentPerSecond`) |
+| `claw_speed:<grad_pro_s>` | → `motor_controller/settings` als JSON (`clawSpeedDegreesPerSecond`) |
 
 ## 5. Payload-Konventionen
 
