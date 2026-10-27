@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 try:
     from python_server.clawmachine.topics import MOTOR_CONTROLLER_COMMAND_TOPIC
     from python_server.configuration_loader import MotorSpeedConfiguration
@@ -76,6 +78,15 @@ class Moving:
 
     def __endstop_reached(self, axis):
         return self.endstop_status.get(axis, 1) == 0
+
+    def set_max_speed_percent(self, axis, percent: int):
+        # Zur Laufzeit vom Webinterface eingestellt (xy_speed:/z_speed:), gilt bis
+        # zum Neustart des Servers; danach wieder der Wert aus config.ini.
+        percent = max(0, min(100, int(percent)))
+        if axis in ("X", "Y"):
+            self.motor_speed_configuration = replace(self.motor_speed_configuration, xy_percent=percent)
+        elif axis == "Z":
+            self.motor_speed_configuration = replace(self.motor_speed_configuration, z_percent=percent)
 
     def max_speed_percent(self, axis) -> int:
         # In config.ini ([motor_speed]) eingestellte Standard-Geschwindigkeit der

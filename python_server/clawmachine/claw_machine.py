@@ -28,6 +28,8 @@ try:
         WEB_INTERFACE_INPUT_SOURCES_REQUEST_TOPIC,
         WEB_INTERFACE_INPUT_SOURCES_SET_TOPIC,
         WEB_INTERFACE_INPUT_SOURCES_TOPIC,
+        WEB_INTERFACE_SPEED_SETTINGS_REQUEST_TOPIC,
+        WEB_INTERFACE_SPEED_SETTINGS_TOPIC,
         device_topic,
         parse_device_name,
     )
@@ -56,6 +58,8 @@ except ModuleNotFoundError:
         WEB_INTERFACE_INPUT_SOURCES_REQUEST_TOPIC,
         WEB_INTERFACE_INPUT_SOURCES_SET_TOPIC,
         WEB_INTERFACE_INPUT_SOURCES_TOPIC,
+        WEB_INTERFACE_SPEED_SETTINGS_REQUEST_TOPIC,
+        WEB_INTERFACE_SPEED_SETTINGS_TOPIC,
         device_topic,
         parse_device_name,
     )
@@ -140,6 +144,7 @@ class ClawMachine:
         self.mqtt_client.subscribe(WEB_INTERFACE_COMMAND_TOPIC)
         self.mqtt_client.subscribe(WEB_INTERFACE_INPUT_SOURCES_REQUEST_TOPIC)
         self.mqtt_client.subscribe(WEB_INTERFACE_INPUT_SOURCES_SET_TOPIC)
+        self.mqtt_client.subscribe(WEB_INTERFACE_SPEED_SETTINGS_REQUEST_TOPIC)
         self.mqtt_client.subscribe(ENDSTOP_TOPIC)
         mqtt_network_client.on_message = self.on_message
 
@@ -165,6 +170,20 @@ class ClawMachine:
         self.mqtt_client.publish(
             MOTOR_CONTROLLER_SETTINGS_TOPIC,
             json.dumps({"clawSpeedDegreesPerSecond": self.claw_speed_degrees_per_second}),
+        )
+
+    def publish_speed_settings(self):
+        # Antwort auf WEB_INTERFACE_SPEED_SETTINGS_REQUEST_TOPIC — wird zusaetzlich nach
+        # jeder Aenderung ueber die Befehle xy_speed:/z_speed:/claw_speed: erneut gepusht.
+        self.mqtt_client.publish(
+            WEB_INTERFACE_SPEED_SETTINGS_TOPIC,
+            json.dumps(
+                {
+                    "xyPercent": self.move_controller.max_speed_percent("X"),
+                    "zPercent": self.move_controller.max_speed_percent("Z"),
+                    "clawDegreesPerSecond": self.claw_speed_degrees_per_second,
+                }
+            ),
         )
 
     def publish_device_list(self):
@@ -228,6 +247,9 @@ class ClawMachine:
             # Eingabequellen (Panel/Joy-Con)
             case _ if topic == WEB_INTERFACE_INPUT_SOURCES_REQUEST_TOPIC:
                 self.publish_input_sources()
+
+            case _ if topic == WEB_INTERFACE_SPEED_SETTINGS_REQUEST_TOPIC:
+                self.publish_speed_settings()
 
             # Webinterface sperrt/entsperrt eine Eingabequelle, z.B. "panel:off"
             case _ if topic == WEB_INTERFACE_INPUT_SOURCES_SET_TOPIC:
@@ -351,14 +373,30 @@ class ClawMachine:
                     self.mqtt_client.publish(
                         MOTOR_CONTROLLER_COMMAND_TOPIC, payload_text
                     )
-                elif name in ("left", "right"):
+                elif name in ("left", "right", "front", "back"):
+                    # value = Eingabe in Prozent (-100..100, Vorzeichen = Richtung) —
+                    # der Server skaliert sie auf die eingestellte XY-Geschwindigkeit.
+                    try:
+                        input_percent = float(value)
+                    except ValueError:
+                        print(f"Invalid movement value: {payload_text}")
+                        return
+                    axis = "X" if name in ("left", "right") else "Y"
                     self.mqtt_client.publish(
-                        MOTOR_CONTROLLER_COMMAND_TOPIC, f"X:{value}"
+                        MOTOR_CONTROLLER_COMMAND_TOPIC,
+                        f"{axis}:{self.move_controller.scale_speed(axis, input_percent)}",
                     )
-                elif name in ("front", "back"):
-                    self.mqtt_client.publish(
-                        MOTOR_CONTROLLER_COMMAND_TOPIC, f"Y:{value}"
+                elif name in ("xy_speed", "z_speed"):
+                    # Standard-Geschwindigkeit der Achsen in Prozent der max. Drehzahl
+                    try:
+                        speed_percent = int(float(value))
+                    except ValueError:
+                        print(f"Invalid speed value: {payload_text}")
+                        return
+                    self.move_controller.set_max_speed_percent(
+                        "X" if name == "xy_speed" else "Z", speed_percent
                     )
+                    self.publish_speed_settings()
                 elif name == "accel":
                     # Eigenes Settings-Topic statt Bewegungsbefehl — der
                     # Motor-Controller erwartet hier JSON, siehe
@@ -382,6 +420,7 @@ class ClawMachine:
                         print(f"Invalid claw speed value: {value}")
                         return
                     self.publish_claw_speed()
+                    self.publish_speed_settings()
                 else:
                     print(f"Unknown webinterface command: {payload_text}")
 

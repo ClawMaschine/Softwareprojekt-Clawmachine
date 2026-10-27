@@ -315,6 +315,17 @@
   cursor: not-allowed;
 }
 
+.claw-slider {
+  flex: 1;
+  min-width: 120px;
+  accent-color: var(--accent);
+}
+
+.claw-slider:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ── Eingabequellen ── */
 
 .input-sources-panel {

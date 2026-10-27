@@ -33,11 +33,12 @@ export class AppComponent implements OnInit, OnDestroy {
   endstopState: EndstopState = { x1: false, x2: false, y1: false, y2: false, z1: false };
   inputSources: InputSourcesState = {};
 
-  // Gleicher Default wie PANEL_MOTOR_SPEED in claw_machine.py. Anders als die
-  // Beschleunigung ist das keine Einstellung auf dem ESP, sondern wird bei
-  // jedem Bewegungsbefehl direkt mitgeschickt (z.B. "left:80") — ein Eingabe-
-  // feld hier reicht deshalb, kein zusätzliches MQTT-Roundtrip/Settings-Topic.
-  controlSpeed = 80;
+  // Standard-Geschwindigkeiten (Prozent der max. Drehzahl) bzw. Klaue (Grad pro
+  // Sekunde). Gelten am Server (siehe [motor_speed] in config.ini) und werden von
+  // dort über speedSettings$ in die Felder übernommen; die Zahlen hier sind nur
+  // Platzhalter, bis die erste Antwort da ist.
+  xySpeedPercent = 100;
+  zSpeedPercent = 100;
 
   // Gleicher Default wie CLAW_MOTOR_ACCELERATION_PERCENT_PER_SECOND in
   // firmware_config.h — Prozentpunkte Geschwindigkeit pro Sekunde.
@@ -46,6 +47,16 @@ export class AppComponent implements OnInit, OnDestroy {
   // Gleicher Default wie DEFAULT_SPEED_DEGREES_PER_SECOND in claw_servo_motor.h —
   // Fahrgeschwindigkeit der Klaue in Grad pro Sekunde.
   clawSpeedDegreesPerSecond = 35;
+
+  // Fahrbereich der Klaue in Grad, entspricht MIN_/MAX_ALLOWED_ANGLE_DEGREES in
+  // lib/claw_motor/claw_servo_motor.h (kleiner = offen, groesser = zu). Der Servo begrenzt
+  // selbst; hier nur, damit der Regler denselben Bereich zeigt.
+  readonly clawMinAngleDegrees = 90;
+  readonly clawMaxAngleDegrees = 160;
+  clawAngleDegrees = 90;
+  // Waehrend des Ziehens hoechstens alle 100 ms senden, nicht bei jedem Pixel.
+  private lastClawAngleSentAtMilliseconds = 0;
+  private static readonly CLAW_ANGLE_SEND_INTERVAL_MILLISECONDS = 100;
 
   private subs: Subscription[] = [];
 
@@ -58,6 +69,13 @@ export class AppComponent implements OnInit, OnDestroy {
       this.mqttService.deviceLogs$.subscribe(l => (this.deviceLogs = l)),
       this.mqttService.endstopState$.subscribe(e => (this.endstopState = e)),
       this.mqttService.inputSources$.subscribe(s => (this.inputSources = s)),
+      this.mqttService.speedSettings$.subscribe(settings => {
+        if (settings) {
+          this.xySpeedPercent = settings.xyPercent;
+          this.zSpeedPercent = settings.zPercent;
+          this.clawSpeedDegreesPerSecond = settings.clawDegreesPerSecond;
+        }
+      }),
       // Trigger change detection every second to refresh uptime displays
       interval(1000).subscribe(() => {
         this.devices = [...this.mqttService.devices$.value];
@@ -105,13 +123,14 @@ export class AppComponent implements OnInit, OnDestroy {
   // auf X und "front"/"back" auf Y — der tatsächliche Tastenname muss also
   // mitgeschickt werden, nicht nur die Geschwindigkeit.
   startMoveX(direction: 'left' | 'right'): void {
-    const speed = direction === 'left' ? this.controlSpeed : -this.controlSpeed;
+    // 100 % bzw. -100 % — der Server skaliert auf die eingestellte XY-Geschwindigkeit.
+    const speed = direction === 'left' ? 100 : -100;
     this.mqttService.publishCommand(`${direction}:${speed}`);
   }
 
   startMoveY(direction: 'up' | 'down'): void {
     const name = direction === 'up' ? 'front' : 'back';
-    const speed = direction === 'up' ? -this.controlSpeed : this.controlSpeed;
+    const speed = direction === 'up' ? -100 : 100;
     this.mqttService.publishCommand(`${name}:${speed}`);
   }
 
@@ -127,8 +146,30 @@ export class AppComponent implements OnInit, OnDestroy {
     this.mqttService.publishCommand(`claw:${action}`);
   }
 
+  onClawAngleInput(): void {
+    const now = Date.now();
+    if (now - this.lastClawAngleSentAtMilliseconds < AppComponent.CLAW_ANGLE_SEND_INTERVAL_MILLISECONDS) {
+      return;
+    }
+    this.sendClawAngle();
+  }
+
+  // Beim Loslassen immer senden, damit der Endwert sicher ankommt.
+  sendClawAngle(): void {
+    this.lastClawAngleSentAtMilliseconds = Date.now();
+    this.mqttService.publishCommand(`claw:${this.clawAngleDegrees}`);
+  }
+
   sendAcceleration(): void {
     this.mqttService.publishCommand(`accel:${this.accelerationPercentPerSecond}`);
+  }
+
+  sendXySpeed(): void {
+    this.mqttService.publishCommand(`xy_speed:${this.xySpeedPercent}`);
+  }
+
+  sendZSpeed(): void {
+    this.mqttService.publishCommand(`z_speed:${this.zSpeedPercent}`);
   }
 
   sendClawSpeed(): void {

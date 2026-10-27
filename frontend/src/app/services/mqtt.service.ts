@@ -36,6 +36,14 @@ const EMPTY_ENDSTOP_STATE: EndstopState = { x1: false, x2: false, y1: false, y2:
 // InputSourceControl in claw_machine.py). Aktuell "panel" und "joycon".
 export type InputSourcesState = Record<string, boolean>;
 
+// Antwort des Servers auf SPEED_SETTINGS_REQUEST_TOPIC (siehe publish_speed_settings()
+// in claw_machine.py).
+export interface SpeedSettings {
+  xyPercent: number;
+  zPercent: number;
+  clawDegreesPerSecond: number;
+}
+
 const CLAWMACHINE_TOPIC_PREFIX = 'clawmachine/';
 
 // Haupt-Steuertopic des Servers — Befehle mit X:/Y:/Z:/claw:-Präfix werden
@@ -61,6 +69,8 @@ const ENDSTOP_TOPIC = 'clawmachine/web_interface/endstop';
 const INPUT_SOURCES_REQUEST_TOPIC = 'clawmachine/web_interface/input_sources/request';
 const INPUT_SOURCES_TOPIC = 'clawmachine/web_interface/input_sources';
 const INPUT_SOURCES_SET_TOPIC = 'clawmachine/web_interface/input_sources/set';
+const SPEED_SETTINGS_REQUEST_TOPIC = 'clawmachine/web_interface/speed_settings/request';
+const SPEED_SETTINGS_TOPIC = 'clawmachine/web_interface/speed_settings';
 
 // Wie bei den ESP-Boards: eigenes Status-Topic mit Last-Will (siehe
 // ClawMqttConnection::ensureMqttConnected in claw_mqtt_connection.cpp).
@@ -120,6 +130,9 @@ export class MqttService implements OnDestroy {
   // sind, kommt ausschließlich über die Antwort auf INPUT_SOURCES_REQUEST_TOPIC.
   readonly inputSources$ = new BehaviorSubject<InputSourcesState>({});
 
+  // Aktuell am Server eingestellte Geschwindigkeiten; null, solange noch keine Antwort da ist.
+  readonly speedSettings$ = new BehaviorSubject<SpeedSettings | null>(null);
+
   private deviceListRefreshSubscription: Subscription | null = null;
 
   // Einmal pro Tab/Instanz erzeugt (nicht pro connect()-Aufruf), damit die ID
@@ -168,6 +181,7 @@ export class MqttService implements OnDestroy {
       // Einmalig anfragen reicht — Änderungen werden danach vom Server
       // ungefragt gepusht (siehe publish_input_sources() in claw_machine.py).
       this.requestInputSources();
+      this.requestSpeedSettings();
     });
 
     this.client.on('message', (topic: string, payload: Buffer) => {
@@ -224,6 +238,13 @@ export class MqttService implements OnDestroy {
     this.client.publish(INPUT_SOURCES_REQUEST_TOPIC, '');
   }
 
+  requestSpeedSettings(): void {
+    if (!this.client || !this.client.connected) {
+      return;
+    }
+    this.client.publish(SPEED_SETTINGS_REQUEST_TOPIC, '');
+  }
+
   // Sperrt/entsperrt eine Eingabequelle — der Server bestätigt die Änderung
   // (oder lehnt sie ab, z.B. bei unbekanntem Namen) über einen erneuten Push
   // auf INPUT_SOURCES_TOPIC, inputSources$ wird also nicht optimistisch hier
@@ -248,6 +269,11 @@ export class MqttService implements OnDestroy {
 
     if (topic === INPUT_SOURCES_TOPIC) {
       this.applyInputSources(payload);
+      return;
+    }
+
+    if (topic === SPEED_SETTINGS_TOPIC) {
+      this.applySpeedSettings(payload);
       return;
     }
 
@@ -332,6 +358,14 @@ export class MqttService implements OnDestroy {
       y2: Boolean(raw.y2),
       z1: Boolean(raw.z1),
     });
+  }
+
+  private applySpeedSettings(payload: string): void {
+    try {
+      this.speedSettings$.next(JSON.parse(payload) as SpeedSettings);
+    } catch {
+      return;
+    }
   }
 
   private applyInputSources(payload: string): void {

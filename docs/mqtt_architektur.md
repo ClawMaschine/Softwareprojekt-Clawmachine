@@ -115,6 +115,8 @@ am I2C-Bus antworten, sonst Rollback (`rolled_back`).
 | `clawmachine/web_interface/input_sources/request` | Webinterface → Server | leer (Anfrage) |
 | `clawmachine/web_interface/input_sources` | Server → Webinterface | JSON `{"panel":true,"joycon":true}`, auch ungefragt nach jeder Änderung |
 | `clawmachine/web_interface/input_sources/set` | Webinterface → Server | Text `<quelle>:on` oder `<quelle>:off`, Quelle = `panel` oder `joycon` |
+| `clawmachine/web_interface/speed_settings/request` | Webinterface → Server | leer (Anfrage) |
+| `clawmachine/web_interface/speed_settings` | Server → Webinterface | JSON `{"xyPercent":100,"zPercent":100,"clawDegreesPerSecond":35.0}`, auch ungefragt nach jeder Änderung |
 | `clawmachine/web_interface/endstop` | Server → Webinterface | durchgereichter Endstop-JSON (wie `endstop/state`) |
 
 Das Webinterface abonniert `clawmachine/#` und füllt damit Live-Status und Geräte-Log. Die Geräteliste fragt es zusätzlich zyklisch an.
@@ -123,11 +125,12 @@ Das Webinterface abonniert `clawmachine/#` und füllt damit Live-Status und Ger�
 
 | Payload | Wirkung des Servers |
 |---|---|
-| `left:<v>` / `right:<v>` | → `motor_controller/motor/command` als `X:<v>` (Vorzeichen kommt vom Webinterface) |
-| `front:<v>` / `back:<v>` | → `Y:<v>` |
+| `left:<p>` / `right:<p>` | Eingabe in Prozent (-100..100, Vorzeichen = Richtung), vom Server auf die eingestellte XY-Geschwindigkeit skaliert → `motor_controller/motor/command` als `X:<v>` |
+| `front:<p>` / `back:<p>` | wie oben → `Y:<v>` |
 | `claw:<aktion>` | unverändert weitergereicht |
 | `accel:<prozent_pro_s>` | → `motor_controller/settings` als JSON (`accelerationPercentPerSecond`) |
 | `claw_speed:<grad_pro_s>` | → `motor_controller/settings` als JSON (`clawSpeedDegreesPerSecond`) |
+| `xy_speed:<prozent>` / `z_speed:<prozent>` | setzt die Standard-Geschwindigkeit der Achsen am Server (Prozent der max. Drehzahl, gilt bis zum Serverneustart); antwortet auf `web_interface/speed_settings` |
 
 ## 5. Payload-Konventionen
 
