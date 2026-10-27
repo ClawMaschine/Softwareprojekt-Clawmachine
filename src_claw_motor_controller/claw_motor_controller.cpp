@@ -67,8 +67,8 @@ bool ClawMotorController::move(char axis, int speed)
       currentX = speed;
       // xMotorLeft und xMotorRight sind gegensinnig montiert (siehe altes Referenzprogramm) —
       // ohne Spiegelung wuerden sie gegeneinander statt gemeinsam fahren.
-      xMotorLeft.setSpeed(speed);
-      xMotorRight.setSpeed(-speed);
+      xMotorLeft.setSpeed(-speed);
+      xMotorRight.setSpeed(speed);
       Serial.printf("[MOTOR] X: %d\n", speed);
       break;
     case 'Y':
@@ -78,7 +78,7 @@ bool ClawMotorController::move(char axis, int speed)
       Serial.printf("[MOTOR] Y: %d\n", speed);
       break;
     case 'Z':
-      zMotor.setSpeed(speed);
+      zMotor.setSpeed(-speed);
       break;
     default:
       Serial.printf("[MOTOR] Unbekannte Achse: %c\n", axis);

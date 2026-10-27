@@ -9,8 +9,7 @@ struct PanelInput {
     bool right_button   = false;
     bool front_button   = false;
     bool back_button    = false;
-    bool grab_button    = false;
-    bool release_button = false;
+    int claw           = 0;
 
     void begin();
     void read();

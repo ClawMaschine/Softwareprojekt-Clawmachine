@@ -4,11 +4,9 @@
 #include "firmware_config.h"
 #include "panel_input.h"
 
-// Isolierter Test für das Control-Panel — kein Bluepad32, nur WiFi+MQTT und
-// die GPIO-Buttons. Nutzt PanelInput unveraendert aus src_claw_player_input,
-// damit hier keine Logik dupliziert wird. Sendet auf dasselbe Topic wie der
-// echte Player-Input-Controller, damit sich das 1:1 als Ersatz testen laesst,
-// solange dessen Bluepad32-Build nicht baut.
+// Control-Panel: nur WiFi+MQTT und die GPIO-Buttons (PanelInput liegt in diesem
+// Ordner). Sendet unter der Client-ID claw_player_input auf
+// clawmachine/player_input/panel.
 
 static constexpr const char *PANEL_TOPIC = "clawmachine/player_input/panel";
 
@@ -39,10 +37,8 @@ void printPanelState()
   Serial.print(panelInput.front_button);
   Serial.print(" back=");
   Serial.print(panelInput.back_button);
-  Serial.print(" grab=");
-  Serial.print(panelInput.grab_button);
-  Serial.print(" release=");
-  Serial.print(panelInput.release_button);
+  Serial.print(" claw=");
+  Serial.print(panelInput.claw);
   Serial.print(" valid=");
   Serial.println(panelInput.isValid());
 }

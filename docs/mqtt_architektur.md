@@ -103,7 +103,7 @@ am I2C-Bus antworten, sonst Rollback (`rolled_back`).
 
 | Topic | Von → An | Payload |
 |---|---|---|
-| `clawmachine/motor_controller/motor/command` | Server → Motor-Controller | Text `X:<v>`, `Y:<v>`, `Z:<v>` (Geschwindigkeit, ganzzahlig, negativ = Gegenrichtung, `0` = Stopp) oder `claw:<aktion>` (`claw:open`, `claw:close`). Der Motor-Controller akzeptiert zusätzlich JSON, z. B. `{"X":100,"Y":0,"Z":0,"claw":"open"}`; nur enthaltene Felder werden angewendet. Der Server sendet bisher das Textformat |
+| `clawmachine/motor_controller/motor/command` | Server → Motor-Controller | Text `X:<v>`, `Y:<v>`, `Z:<v>` (Geschwindigkeit, ganzzahlig, negativ = Gegenrichtung, `0` = Stopp) oder `claw:<aktion>` (`claw:open`, `claw:close` oder ein Winkel in Grad, z. B. `claw:120`; die Klaue begrenzt auf 90–160°). Der Motor-Controller akzeptiert zusätzlich JSON, z. B. `{"X":100,"Y":0,"Z":0,"claw":"open"}` (`"claw"` auch als Zahl, Winkel in Grad); nur enthaltene Felder werden angewendet. Der Server sendet bisher das Textformat |
 | `clawmachine/motor_controller/settings` | Server → Motor-Controller | JSON `{"accelerationPercentPerSecond": 50.0}` |
 
 ### 3.4 Server ↔ Webinterface
@@ -146,7 +146,6 @@ Auffälligkeiten:
 ## 6. Abweichungen und tote Reste im Code
 
 - `include/firmware_config.h`: `CLAW_DEVICE_ADDED_TOPIC "clawmachine/device/added"` ist ein Rest der alten Anmeldung und wird nicht mehr genutzt.
-- Motor-Controller (`main.cpp`) nimmt im JSON-Befehl `"claw"` auch eine Zahl (Winkel 0–180) an, `ClawMotorController::moveClaw()` kennt aber nur `open`/`close`. Ein numerischer Wert endet daher im `error_log` (`Unbekannter Klauen-Befehl`). `ClawServoMotor::setAngle()` ist schon vorhanden, aber nicht angebunden (Stand: nicht committet).
 - `error_log` und `ota/status` werden vom Server nicht ausgewertet, nur vom Webinterface (über `clawmachine/#`) bzw. `ota_update.py` gelesen.
 - Die Topic-Doku in `CLAUDE.md` nennt noch `clawmachine/joycon`, `claw/uptime_*` und ein Joy-Con-Classic-Bluetooth-Setup. Das ist überholt: der Joy-Con läuft über `player_input/joycon`, Uptime über `<name>/metadata/uptime`.
 - Homing läuft nur automatisch beim Serverstart. Es gibt kein MQTT-Topic, um es zur Laufzeit neu auszulösen.

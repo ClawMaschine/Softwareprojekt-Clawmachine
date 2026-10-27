@@ -23,8 +23,8 @@ void PanelInput::read()
     back_button    = digitalRead(CLAW_PANEL_PIN_BACK)    == LOW;
     // Poti statt Taster: unterhalb der Schwelle greifen, oberhalb loslassen
     const int potentiometer_value = analogRead(CLAW_PANEL_PIN_POTENTIOMETER);
-    grab_button    = potentiometer_value <  CLAW_PANEL_POTENTIOMETER_THRESHOLD;
-    release_button = potentiometer_value >= CLAW_PANEL_POTENTIOMETER_THRESHOLD;
+    claw    = potentiometer_value;
+    
 }
 
 bool PanelInput::isValid() const

@@ -12,7 +12,11 @@ ENDSTOP_FIELD_BY_AXIS = {"X": "x1", "Y": "y1", "Z": "z1"}
 # gehomet werden (erst wenn eine Achse ihren Endstop erreicht hat, startet
 # die naechste) — Geschwindigkeit, mit der dabei Richtung Endstop gefahren wird.
 HOMING_SEQUENCE = ("X", "Y", "Z")
-HOMING_SPEED = 10
+HOMING_SPEED = 30
+
+SPEED_XY = 130
+SPEED_Z = 130
+SPEED_CLAW = 100
 
 
 class Moving:
@@ -65,7 +69,9 @@ class Moving:
 
         print(f"[MOVING] Starte Homing fuer Achse {axis}")
         self.homing_in_progress[axis] = True
-        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"{axis}:{-HOMING_SPEED}")
+        self.mqtt_client.publish(
+            MOTOR_CONTROLLER_COMMAND_TOPIC, f"{axis}:{-HOMING_SPEED}"
+        )
         return True
 
     def __endstop_reached(self, axis):
@@ -87,6 +93,13 @@ class Moving:
         else:
             print(f"[MOVING] Unbekannte Achse: {axis}")
             return False
+        if axis == "X" or axis == "Y":
+            self.mqtt_client.publish(
+                MOTOR_CONTROLLER_COMMAND_TOPIC, f"{axis}:{SPEED_XY}"
+            )
+        if axis == "Z":
+            self.mqtt_client.publish(
+                MOTOR_CONTROLLER_COMMAND_TOPIC, f"{axis}:{SPEED_Z}"
+            )
 
-        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"{axis}:{speed}")
         return True
