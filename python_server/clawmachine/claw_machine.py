@@ -107,7 +107,9 @@ class ClawMachine:
         )
         self.mqtt_client.connect()
         motor_speed_configuration = load_motor_speed_configuration()
-        self.claw_speed_degrees_per_second = motor_speed_configuration.claw_degrees_per_second
+        self.claw_speed_degrees_per_second = (
+            motor_speed_configuration.claw_degrees_per_second
+        )
         self.move_controller = Moving(self.mqtt_client, motor_speed_configuration)
         self.web_interface_presence = WebInterfacePresence()
         self.input_source_control = InputSourceControl(
@@ -169,7 +171,9 @@ class ClawMachine:
         # beim Serverstart und bei jeder (Neu-)Registrierung erneut senden.
         self.mqtt_client.publish(
             MOTOR_CONTROLLER_SETTINGS_TOPIC,
-            json.dumps({"clawSpeedDegreesPerSecond": self.claw_speed_degrees_per_second}),
+            json.dumps(
+                {"clawSpeedDegreesPerSecond": self.claw_speed_degrees_per_second}
+            ),
         )
 
     def publish_speed_settings(self):
@@ -359,6 +363,8 @@ class ClawMachine:
                         "Z": z_speed,
                     }
                 )
+
+                print(json_payload)
                 self.mqtt_client.publish(
                     MOTOR_CONTROLLER_COMMAND_TOPIC, f"{json_payload}"
                 )

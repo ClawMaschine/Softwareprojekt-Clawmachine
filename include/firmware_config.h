@@ -92,10 +92,10 @@
 #define CLAW_PANEL_PIN_DOWN    16
 #endif
 #ifndef CLAW_PANEL_PIN_LEFT
-#define CLAW_PANEL_PIN_LEFT    21
+#define CLAW_PANEL_PIN_LEFT    3
 #endif
 #ifndef CLAW_PANEL_PIN_RIGHT
-#define CLAW_PANEL_PIN_RIGHT   3
+#define CLAW_PANEL_PIN_RIGHT   21
 #endif
 #ifndef CLAW_PANEL_PIN_FRONT
 #define CLAW_PANEL_PIN_FRONT   1
