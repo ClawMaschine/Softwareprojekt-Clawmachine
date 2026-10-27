@@ -62,3 +62,28 @@ def load_camera_configuration() -> CameraConfiguration:
         frame_rate=frame_rate,
         http_port=http_port,
     )
+
+
+@dataclass(frozen=True)
+class MotorSpeedConfiguration:
+    xy_percent: int
+    z_percent: int
+    claw_degrees_per_second: float
+
+
+def load_motor_speed_configuration() -> MotorSpeedConfiguration:
+    config_parser = ConfigParser()
+    project_root = Path(__file__).parent.parent
+    config_parser.read([project_root / "config.ini", project_root / "config.local.ini"])
+
+    xy_percent = config_parser.getint("motor_speed", "xy_percent", fallback=100)
+    z_percent = config_parser.getint("motor_speed", "z_percent", fallback=100)
+    claw_degrees_per_second = config_parser.getfloat(
+        "motor_speed", "claw_degrees_per_second", fallback=35.0
+    )
+
+    return MotorSpeedConfiguration(
+        xy_percent=max(0, min(100, xy_percent)),
+        z_percent=max(0, min(100, z_percent)),
+        claw_degrees_per_second=claw_degrees_per_second,
+    )

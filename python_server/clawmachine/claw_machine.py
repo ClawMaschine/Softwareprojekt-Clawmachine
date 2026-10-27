@@ -4,7 +4,10 @@ import time
 from typing import Optional
 
 try:
-    from python_server.configuration_loader import load_mqtt_configuration
+    from python_server.configuration_loader import (
+        load_motor_speed_configuration,
+        load_mqtt_configuration,
+    )
     from python_server.mqtt import MQTTClient
     from python_server.clawmachine.device_registry import DeviceRegistry
     from python_server.clawmachine.esp_device import EspDevice
@@ -29,7 +32,10 @@ try:
         parse_device_name,
     )
 except ModuleNotFoundError:
-    from configuration_loader import load_mqtt_configuration
+    from configuration_loader import (
+        load_motor_speed_configuration,
+        load_mqtt_configuration,
+    )
     from mqtt import MQTTClient
     from device_registry import DeviceRegistry
     from esp_device import EspDevice
@@ -57,8 +63,9 @@ except ModuleNotFoundError:
 
 MOTOR_COMMAND_PREFIXES = ("X:", "Y:", "Z:", "claw:")
 
-# Der Joy-Con (src_claw_switch2_scanner) sendet dasselbe JSON-Format wie das
-# Control-Panel, deshalb dieselbe Auswertung — nur ohne grab/release.
+# Der Joy-Con (src_claw_switch2_scanner) sendet dieselben Feldnamen wie das
+# Control-Panel, deshalb dieselbe Auswertung — nur ohne grab/release. Das Panel
+# sendet 0/1 pro Taste, der Joy-Con 0-100 (Auslenkung/Druck in Prozent).
 PLAYER_INPUT_TOPICS = (PLAYER_INPUT_PANEL_TOPIC, PLAYER_INPUT_JOYCON_TOPIC)
 # Welcher InputSourceControl-Name zu welchem Eingabe-Topic gehört — nur diese
 # beiden sind über das Webinterface sperrbar (siehe WEB_INTERFACE_INPUT_SOURCES_SET_TOPIC).
@@ -73,7 +80,9 @@ INPUT_SOURCE_NAME_BY_TOPIC = {
 # deshalb bewusst nicht in der DeviceRegistry registriert, siehe
 # WebInterfacePresence.
 WEB_INTERFACE_DEVICE_PREFIX = "claw_web_interface_"
-PANEL_MOTOR_SPEED = 130
+# Client-ID des Motor-Controller-ESP (CLAW_MOTOR_CONTROLLER_CLIENT_ID) — sobald
+# er sich (neu) meldet, bekommt er die Klauen-Geschwindigkeit nachgeschickt.
+MOTOR_CONTROLLER_DEVICE_NAME = "claw_motor_controller"
 
 
 @dataclass
@@ -93,7 +102,9 @@ class ClawMachine:
             password=mqtt_configuration.password,
         )
         self.mqtt_client.connect()
-        self.move_controller = Moving(self.mqtt_client)
+        motor_speed_configuration = load_motor_speed_configuration()
+        self.claw_speed_degrees_per_second = motor_speed_configuration.claw_degrees_per_second
+        self.move_controller = Moving(self.mqtt_client, motor_speed_configuration)
         self.web_interface_presence = WebInterfacePresence()
         self.input_source_control = InputSourceControl(
             INPUT_SOURCE_NAME_BY_TOPIC.values()
@@ -110,6 +121,7 @@ class ClawMachine:
 
         # Subscriptions muessen vorher stehen, sonst koennten die
         # Endstop-Updates, die die Sequenz voranschalten, nie ankommen.
+        self.publish_claw_speed()
         self.move_controller.start_homing_sequence()
 
         self.main_loop_started_at = time.time()
@@ -142,7 +154,18 @@ class ClawMachine:
             device = self.device_registry.add(esp_name)
             registered_topic = device_topic(esp_name, "registered")
             self.mqtt_client.publish(registered_topic, "ok")
+            if esp_name == MOTOR_CONTROLLER_DEVICE_NAME:
+                self.publish_claw_speed()
         return device
+
+    def publish_claw_speed(self):
+        # Die Klauen-Geschwindigkeit liegt als Setting auf dem Motor-Controller
+        # (Grad pro Sekunde) und geht verloren, wenn dieser neu startet — deshalb
+        # beim Serverstart und bei jeder (Neu-)Registrierung erneut senden.
+        self.mqtt_client.publish(
+            MOTOR_CONTROLLER_SETTINGS_TOPIC,
+            json.dumps({"clawSpeedDegreesPerSecond": self.claw_speed_degrees_per_second}),
+        )
 
     def publish_device_list(self):
         # Antwort auf WEB_INTERFACE_DEVICE_LIST_REQUEST_TOPIC — wird nur auf Anfrage
@@ -282,26 +305,30 @@ class ClawMachine:
                     print(f"Ignoring input from {source_name} because it is disabled.")
                     return
                 panel_buttons = json.loads(payload_text)
+                # Alles in Prozent (0-100) umrechnen, bevor es in den gemeinsamen
+                # Zustand von Panel und Joy-Con eingeht: das Panel sendet 0/1
+                # (gedrueckt = 100 %), der Joy-Con direkt 0-100.
+                is_percent_source = topic == PLAYER_INPUT_JOYCON_TOPIC
+                for button_name, button_value in panel_buttons.items():
+                    if is_percent_source:
+                        panel_buttons[button_name] = max(0, min(100, int(button_value)))
+                    else:
+                        panel_buttons[button_name] = 100 if button_value else 0
                 self.panel_button_state.update(panel_buttons)
 
-                if self.panel_button_state.get("right"):
-                    x_speed = PANEL_MOTOR_SPEED
-                elif self.panel_button_state.get("left"):
-                    x_speed = -PANEL_MOTOR_SPEED
-                else:
-                    x_speed = 0
-                if self.panel_button_state.get("back"):
-                    y_speed = PANEL_MOTOR_SPEED
-                elif self.panel_button_state.get("front"):
-                    y_speed = -PANEL_MOTOR_SPEED
-                else:
-                    y_speed = 0
-                if self.panel_button_state.get("up"):
-                    z_speed = PANEL_MOTOR_SPEED
-                elif self.panel_button_state.get("down"):
-                    z_speed = -PANEL_MOTOR_SPEED
-                else:
-                    z_speed = 0
+                # Gegenueberliegende Richtungen ergeben die Differenz (-100..100,
+                # Vorzeichen = Richtung) und werden dann prozentual auf die in
+                # config.ini eingestellte Standard-Geschwindigkeit der Achse skaliert.
+                state = self.panel_button_state
+                x_speed = self.move_controller.scale_speed(
+                    "X", state.get("right", 0) - state.get("left", 0)
+                )
+                y_speed = self.move_controller.scale_speed(
+                    "Y", state.get("back", 0) - state.get("front", 0)
+                )
+                z_speed = self.move_controller.scale_speed(
+                    "Z", state.get("up", 0) - state.get("down", 0)
+                )
 
                 json_payload = json.dumps(
                     {
@@ -347,16 +374,14 @@ class ClawMachine:
                     )
                 elif name == "claw_speed":
                     # Fahrgeschwindigkeit der Klaue in Grad/s, ebenfalls ein
-                    # Settings-JSON (siehe "accel" oben).
+                    # Settings-JSON (siehe "accel" oben). Wird gemerkt, damit sie
+                    # nach einem Neustart des Motor-Controllers erneut gesendet wird.
                     try:
-                        claw_speed = float(value)
+                        self.claw_speed_degrees_per_second = float(value)
                     except ValueError:
                         print(f"Invalid claw speed value: {value}")
                         return
-                    self.mqtt_client.publish(
-                        MOTOR_CONTROLLER_SETTINGS_TOPIC,
-                        json.dumps({"clawSpeedDegreesPerSecond": claw_speed}),
-                    )
+                    self.publish_claw_speed()
                 else:
                     print(f"Unknown webinterface command: {payload_text}")
 

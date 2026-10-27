@@ -237,39 +237,62 @@ static constexpr uint8_t JOYCON_RIGHT_A_BUTTON_BYTE = 0x02;
 static constexpr uint8_t JOYCON_RIGHT_A_BUTTON_MASK = 0x02;
 
 // Ab welcher Auslenkung der Stick als Richtung gilt. Darunter passiert nichts.
+// Darueber wird die Auslenkung auf 0-100 % umgerechnet (Schwelle = 0 %, Anschlag
+// = 100 %), damit die Geschwindigkeit weich einsetzt.
 static constexpr int8_t JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT = 30;
+// Werte werden auf Vielfache davon gerundet, damit nicht jede kleine
+// Stickbewegung eine MQTT-Nachricht ausloest.
+static constexpr uint8_t JOYCON_PERCENT_STEP = 5;
+// Tasten zaehlen als voll gedrueckt.
+static constexpr uint8_t JOYCON_BUTTON_PRESSED_PERCENT = 100;
 
 static constexpr const char *JOYCON_CONTROL_TOPIC = "clawmachine/player_input/joycon";
 
-// Feldnamen und Bedeutung sind bewusst identisch zu PanelInput, damit der
-// Python-Server dieselbe Auswertung nutzen kann (siehe on_control_command in
-// python_server/clawmachine/claw_machine.py).
+// Feldnamen entsprechen PanelInput, der Python-Server wertet beide gemeinsam aus
+// (siehe on_control_command in python_server/clawmachine/claw_machine.py). Anders
+// als beim Panel (0/1) steht pro Richtung ein Wert von 0 bis 100 (Prozent): Tasten
+// 100, beim Stick die umgerechnete Auslenkung.
 struct JoyConControlState
 {
-  bool upButton    = false;
-  bool downButton  = false;
-  bool leftButton  = false;
-  bool rightButton = false;
-  bool frontButton = false;
-  bool backButton  = false;
+  uint8_t upPercent    = 0;
+  uint8_t downPercent  = 0;
+  uint8_t leftPercent  = 0;
+  uint8_t rightPercent = 0;
+  uint8_t frontPercent = 0;
+  uint8_t backPercent  = 0;
 
   // Gegensaetzliche Richtungen derselben Achse gleichzeitig ergeben keinen
   // sinnvollen Motorbefehl. Spiegelt PanelInput::isValid().
   bool isValid() const
   {
-    if (leftButton && rightButton) return false;
-    if (frontButton && backButton) return false;
-    if (upButton && downButton)    return false;
+    if (leftPercent > 0 && rightPercent > 0) return false;
+    if (frontPercent > 0 && backPercent > 0) return false;
+    if (upPercent > 0 && downPercent > 0)    return false;
     return true;
   }
 
   bool equals(const JoyConControlState &other) const
   {
-    return upButton == other.upButton && downButton == other.downButton &&
-           leftButton == other.leftButton && rightButton == other.rightButton &&
-           frontButton == other.frontButton && backButton == other.backButton;
+    return upPercent == other.upPercent && downPercent == other.downPercent &&
+           leftPercent == other.leftPercent && rightPercent == other.rightPercent &&
+           frontPercent == other.frontPercent && backPercent == other.backPercent;
   }
 };
+
+// Stick-Auslenkung (0-100 %) hinter der Schwelle auf 0-100 % umrechnen und auf
+// JOYCON_PERCENT_STEP runden. Unter der Schwelle 0.
+static uint8_t convertStickDeflectionToPercent(int8_t signedPercent, bool isPositiveDirection)
+{
+  const int16_t directedPercent = isPositiveDirection ? signedPercent : -signedPercent;
+  if (directedPercent < JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
+  {
+    return 0;
+  }
+  const int16_t scaledPercent = (directedPercent - JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT) * 100 /
+                                (100 - JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT);
+  const int16_t roundedPercent = (scaledPercent + JOYCON_PERCENT_STEP / 2) / JOYCON_PERCENT_STEP * JOYCON_PERCENT_STEP;
+  return static_cast<uint8_t>(constrain(roundedPercent, 0, 100));
+}
 
 ClawMqttConnection mqttConnection(
     CLAW_CLIENT_WIFI_SSID,
@@ -1106,12 +1129,12 @@ static JoyConControlState readControlStateFromReport(const ReportTracker &tracke
 
   const uint8_t buttons = report[JOYCON_BUTTON_BYTE];
 
-  state.leftButton  = (buttons & JOYCON_MASK_DIRECTION_LEFT) != 0;
-  state.rightButton = (buttons & JOYCON_MASK_DIRECTION_RIGHT) != 0;
-  state.frontButton = (buttons & JOYCON_MASK_DIRECTION_DOWN) != 0;
-  state.backButton  = (buttons & JOYCON_MASK_DIRECTION_UP) != 0;
-  state.upButton    = (buttons & JOYCON_MASK_SHOULDER_UPPER) != 0;
-  state.downButton  = (buttons & JOYCON_MASK_SHOULDER_LOWER) != 0;
+  state.leftPercent  = (buttons & JOYCON_MASK_DIRECTION_LEFT)  != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
+  state.rightPercent = (buttons & JOYCON_MASK_DIRECTION_RIGHT) != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
+  state.frontPercent = (buttons & JOYCON_MASK_DIRECTION_DOWN)  != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
+  state.backPercent  = (buttons & JOYCON_MASK_DIRECTION_UP)    != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
+  state.upPercent    = (buttons & JOYCON_MASK_SHOULDER_UPPER)  != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
+  state.downPercent  = (buttons & JOYCON_MASK_SHOULDER_LOWER)  != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
 
   const bool canReadStick = tracker.hasStickCenter &&
                             tracker.firstStickOffset != NO_STICK_OFFSET &&
@@ -1125,23 +1148,12 @@ static JoyConControlState readControlStateFromReport(const ReportTracker &tracke
   const int8_t horizontalPercent = convertAxisToPercent(raw.x, tracker.stickCenter.x);
   const int8_t verticalPercent   = convertAxisToPercent(raw.y, tracker.stickCenter.y);
 
-  if (horizontalPercent >= JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
-  {
-    state.rightButton = true;  // Stick nach rechts
-  }
-  else if (horizontalPercent <= -JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
-  {
-    state.leftButton = true;   // Stick nach links
-  }
-
-  if (verticalPercent >= JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
-  {
-    state.backButton = true;   // Stick nach oben
-  }
-  else if (verticalPercent <= -JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
-  {
-    state.frontButton = true;  // Stick nach unten
-  }
+  // Stick und Tasten wirken zusammen: gilt der hoehere Wert (Stick nach rechts: rechts;
+  // nach links: links; nach oben: hinten; nach unten: vorne).
+  state.rightPercent = max(state.rightPercent, convertStickDeflectionToPercent(horizontalPercent, true));
+  state.leftPercent  = max(state.leftPercent,  convertStickDeflectionToPercent(horizontalPercent, false));
+  state.backPercent  = max(state.backPercent,  convertStickDeflectionToPercent(verticalPercent, true));
+  state.frontPercent = max(state.frontPercent, convertStickDeflectionToPercent(verticalPercent, false));
 
   return state;
 }
@@ -1323,15 +1335,15 @@ static void publishPendingControlState()
 
   hasPendingControlState = false;
 
-  // Beide Controller verodern: was auf einer der beiden Seiten gedrueckt ist,
-  // gilt. So funktioniert gleichzeitiges Bedienen sinnvoll.
+  // Beide Controller zusammenfuehren: pro Richtung gilt der hoehere Wert. So
+  // funktioniert gleichzeitiges Bedienen sinnvoll.
   JoyConControlState state;
-  state.upButton    = leftControlState.upButton    || rightControlState.upButton;
-  state.downButton  = leftControlState.downButton  || rightControlState.downButton;
-  state.leftButton  = leftControlState.leftButton  || rightControlState.leftButton;
-  state.rightButton = leftControlState.rightButton || rightControlState.rightButton;
-  state.frontButton = leftControlState.frontButton || rightControlState.frontButton;
-  state.backButton  = leftControlState.backButton  || rightControlState.backButton;
+  state.upPercent    = max(leftControlState.upPercent,    rightControlState.upPercent);
+  state.downPercent  = max(leftControlState.downPercent,  rightControlState.downPercent);
+  state.leftPercent  = max(leftControlState.leftPercent,  rightControlState.leftPercent);
+  state.rightPercent = max(leftControlState.rightPercent, rightControlState.rightPercent);
+  state.frontPercent = max(leftControlState.frontPercent, rightControlState.frontPercent);
+  state.backPercent  = max(leftControlState.backPercent,  rightControlState.backPercent);
 
   if (!state.isValid())
   {
@@ -1352,9 +1364,9 @@ static void publishPendingControlState()
   char payload[160];
   snprintf(payload, sizeof(payload),
            "{\"up\":%d,\"down\":%d,\"left\":%d,\"right\":%d,\"front\":%d,\"back\":%d}",
-           state.upButton, state.downButton,
-           state.leftButton, state.rightButton,
-           state.frontButton, state.backButton);
+           state.upPercent, state.downPercent,
+           state.leftPercent, state.rightPercent,
+           state.frontPercent, state.backPercent);
 
   mqttConnection.publish(JOYCON_CONTROL_TOPIC, payload);
   Serial.printf("[MQTT]  %s -> %s\n", JOYCON_CONTROL_TOPIC, payload);

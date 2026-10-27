@@ -57,7 +57,7 @@ Beim Start publiziert der Server außerdem die Homing-Sequenz (`Moving.start_hom
 Ablauf einer Spielereingabe:
 1. Panel oder Joy-Con publiziert den Tastenzustand (JSON) auf `player_input/panel` bzw. `player_input/joycon`.
 2. Server prüft, ob die Quelle freigegeben ist (`input_sources`), führt den Zustand mit dem letzten zusammen
-   und rechnet ihn in Geschwindigkeiten um (`PANEL_MOTOR_SPEED = 130`).
+   und rechnet ihn prozentual in Geschwindigkeiten um: Panel-Tasten zählen als 100 %, Joy-Con-Werte (0–100) werden direkt als Prozent genommen. Die Standard-Geschwindigkeit je Achsengruppe steht in `config.ini` (`[motor_speed]`: `xy_percent`, `z_percent`, `claw_degrees_per_second`).
 3. Server publiziert pro Achse `X:<v>`, `Y:<v>`, `Z:<v>` auf `motor_controller/motor/command`.
 4. Motor-Controller setzt die Achse um.
 
@@ -94,7 +94,7 @@ am I2C-Bus antworten, sonst Rollback (`rolled_back`).
 | Topic | Von → An | Payload |
 |---|---|---|
 | `clawmachine/player_input/panel` | Panel-ESP → Server | JSON `{"up":0,"down":0,"left":0,"right":0,"front":0,"back":0,"claw":0}` (0/1), nur bei Änderung |
-| `clawmachine/player_input/joycon` | Joy-Con-ESP → Server | JSON `{"up":0,"down":0,"left":0,"right":0,"front":0,"back":0}` (0/1), nur bei Änderung. Gleiches Format wie Panel ohne `claw` |
+| `clawmachine/player_input/joycon` | Joy-Con-ESP → Server | JSON `{"up":0,"down":0,"left":0,"right":0,"front":0,"back":0}`, Werte 0–100 (Prozent: Tasten 100, Stick = Auslenkung hinter der Totzone, in 5er-Schritten), nur bei Änderung. Gleiche Feldnamen wie Panel (dort 0/1) ohne `claw` |
 | `clawmachine/endstop/state` | Endstop-ESP → Server | JSON `{"x1":0,"x2":0,"y1":0,"y2":0,"z1":0}`, `1` = ausgelöst, nur bei Änderung |
 | `clawmachine/web_interface/command` | Webinterface → Server | Text `<name>:<wert>`, siehe 4 |
 | `clawmachine/claw` | beliebig → Server | Text `X:<v>` / `Y:<v>` / `Z:<v>` / `claw:<aktion>`, Haupt-Steuertopic (wird vom Emulator `steering.py` genutzt) |

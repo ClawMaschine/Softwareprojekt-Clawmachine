@@ -1,7 +1,9 @@
 try:
     from python_server.clawmachine.topics import MOTOR_CONTROLLER_COMMAND_TOPIC
+    from python_server.configuration_loader import MotorSpeedConfiguration
 except ModuleNotFoundError:
     from topics import MOTOR_CONTROLLER_COMMAND_TOPIC
+    from configuration_loader import MotorSpeedConfiguration
 
 # Rohe Feldnamen im Endstop-JSON (siehe src_claw_server/main.cpp) auf die
 # Achsen-Buchstaben abgebildet, die hier und in claw_machine.py verwendet
@@ -14,9 +16,6 @@ ENDSTOP_FIELD_BY_AXIS = {"X": "x1", "Y": "y1", "Z": "z1"}
 HOMING_SEQUENCE = ("X", "Y", "Z")
 HOMING_SPEED = 30
 
-SPEED_XY = 130
-SPEED_Z = 130
-SPEED_CLAW = 100
 
 
 class Moving:
@@ -31,8 +30,9 @@ class Moving:
         "Z": 0,
     }
 
-    def __init__(self, mqtt_client):
+    def __init__(self, mqtt_client, motor_speed_configuration: MotorSpeedConfiguration):
         self.mqtt_client = mqtt_client
+        self.motor_speed_configuration = motor_speed_configuration
         self.homing_in_progress = {"X": False, "Y": False, "Z": False}
 
     def update_endstop_status(self, endstop_state: dict):
@@ -77,7 +77,23 @@ class Moving:
     def __endstop_reached(self, axis):
         return self.endstop_status.get(axis, 1) == 0
 
+    def max_speed_percent(self, axis) -> int:
+        # In config.ini ([motor_speed]) eingestellte Standard-Geschwindigkeit der
+        # Achse in Prozent der maximalen Motordrehzahl. X und Y teilen sich einen Wert.
+        if axis in ("X", "Y"):
+            return self.motor_speed_configuration.xy_percent
+        if axis == "Z":
+            return self.motor_speed_configuration.z_percent
+        return 0
+
+    def scale_speed(self, axis, input_percent: float) -> int:
+        # input_percent (-100..100, Vorzeichen = Richtung) prozentual auf die
+        # Standard-Geschwindigkeit der Achse umrechnen.
+        return round(self.max_speed_percent(axis) * input_percent / 100)
+
     def move_axis(self, axis, speed: int):
+        # speed = Eingabe in Prozent (-100..100, Vorzeichen = Richtung), wird auf die
+        # Standard-Geschwindigkeit der Achse skaliert.
         print(f"[MOVING] Bewegung der Achse {axis} mit Geschwindigkeit {speed}")
         if self.__endstop_reached(axis):
             print(f"[MOVING] Bewegung der Achse {axis} abgebrochen — Endstop erreicht")
@@ -86,20 +102,11 @@ class Moving:
         # Position wird hier erstmal nur grob mitgezaehlt (kein echtes
         # Weg-Zeit-Modell) — der Motor-Controller-ESP bekommt ausschliesslich
         # die Geschwindigkeit und macht selbst keine Positionsberechnung.
-        if axis == "X":
-            self.position["X"] += speed
-        elif axis == "Y":
-            self.position["Y"] += speed
-        else:
+        if axis not in ("X", "Y", "Z"):
             print(f"[MOVING] Unbekannte Achse: {axis}")
             return False
-        if axis == "X" or axis == "Y":
-            self.mqtt_client.publish(
-                MOTOR_CONTROLLER_COMMAND_TOPIC, f"{axis}:{SPEED_XY}"
-            )
-        if axis == "Z":
-            self.mqtt_client.publish(
-                MOTOR_CONTROLLER_COMMAND_TOPIC, f"{axis}:{SPEED_Z}"
-            )
+        scaled_speed = self.scale_speed(axis, speed)
+        self.position[axis] += scaled_speed
+        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"{axis}:{scaled_speed}")
 
         return True
