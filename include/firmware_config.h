@@ -86,10 +86,10 @@
 
 // Hardware panel button GPIO pins — an tatsächliche Verdrahtung anpassen
 #ifndef CLAW_PANEL_PIN_UP
-#define CLAW_PANEL_PIN_UP      17
+#define CLAW_PANEL_PIN_UP      16
 #endif
 #ifndef CLAW_PANEL_PIN_DOWN
-#define CLAW_PANEL_PIN_DOWN    16
+#define CLAW_PANEL_PIN_DOWN    17
 #endif
 #ifndef CLAW_PANEL_PIN_LEFT
 #define CLAW_PANEL_PIN_LEFT    3

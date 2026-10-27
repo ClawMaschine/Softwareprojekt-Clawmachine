@@ -129,8 +129,8 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   startMoveY(direction: 'up' | 'down'): void {
-    const name = direction === 'up' ? 'front' : 'back';
-    const speed = direction === 'up' ? -100 : 100;
+    const name = direction === 'up' ? 'back' : 'front';
+    const speed = direction === 'up' ? 100 : -100;
     this.mqttService.publishCommand(`${name}:${speed}`);
   }
 
