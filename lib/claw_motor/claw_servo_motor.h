@@ -14,6 +14,9 @@ public:
   // Freie Position in Grad, begrenzt auf den erlaubten Fahrbereich der Klaue
   // (MIN_/MAX_ALLOWED_ANGLE_DEGREES), zum Testen/Feinjustieren.
   void setAngle(uint8_t angleDegrees);
+  void update();
+  void setSpeed(float degreesPerSecond);
+  
 
   // Fahrbereich, den die Klaue mechanisch nutzen darf (am Aufbau ermittelt mit
   // src_esp_test). Winkel ausserhalb werden abgeschnitten.
@@ -21,6 +24,14 @@ public:
   static const uint8_t MAX_ALLOWED_ANGLE_DEGREES = 160;
 
 private:
+
+  void updateMovement();
+
+  float currentAngle = MIN_ALLOWED_ANGLE_DEGREES;
+  float targetAngle = MIN_ALLOWED_ANGLE_DEGREES;
+  float speedDegreesPerSecond = 35.0f;
+
+  unsigned long lastUpdateMicroseconds = 0;
   // 50 Hz, Pulsbreite 700-2300 us entspricht 0-180 Grad bei Servo::write().
   // Der volle Standardbereich (500-2400 us) laesst den Servo rattern.
   static const int SERVO_PERIOD_HERTZ = 50;

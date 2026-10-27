@@ -57,6 +57,8 @@ void ClawMotorController::update()
   yMotor.update();
   xMotorRight.update();
   zMotor.update();
+
+  clawServo.update();
 }
 
 
@@ -101,6 +103,7 @@ void ClawMotorController::setAcceleration(float percentPerSecond)
 
 bool ClawMotorController::moveClaw(const char *command)
 {
+  clawServo.setSpeed(10);
   if (strcmp(command, "open") == 0) {
     clawServo.open();
     Serial.println("[MOTOR] Klaue: open");
