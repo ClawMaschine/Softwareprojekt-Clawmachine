@@ -200,10 +200,16 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
     message += (char)payload[i];   // payload ist NICHT null-terminiert!
   }
 
-  Serial.print("[MOTOR_CONTROLLER] Nachricht auf ");
-  Serial.print(topic);
-  Serial.print(": ");
-  Serial.println(message);
+  // Fahrbefehle kommen bis zu mehrmals pro Sekunde. Jede serielle Ausgabe blockiert bei
+  // 115200 Baud einige Millisekunden den loop() und damit die Schritte der Motoren
+  // (spuerbar als Ruck). Deshalb hier nicht mitprotokollieren; die Achsen melden ihre
+  // Geschwindigkeit selbst in ClawMotorController::move().
+  if (strcmp(topic, MOTOR_COMMAND_TOPIC) != 0) {
+    Serial.print("[MOTOR_CONTROLLER] Nachricht auf ");
+    Serial.print(topic);
+    Serial.print(": ");
+    Serial.println(message);
+  }
 
   if (otaUpdater.handleMessage(topic, message)) {
     return;

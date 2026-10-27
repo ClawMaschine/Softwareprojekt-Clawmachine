@@ -1,3 +1,4 @@
+import math
 from dataclasses import replace
 
 try:
@@ -110,7 +111,14 @@ class Moving:
     def scale_speed(self, axis, input_percent: float) -> int:
         # input_percent (-100..100, Vorzeichen = Richtung) prozentual auf die
         # Standard-Geschwindigkeit der Achse umrechnen.
-        return round(self.max_speed_percent(axis) * input_percent / 100)
+        max_speed_percent = self.max_speed_percent(axis)
+        scaled_speed = round(max_speed_percent * input_percent / 100)
+        if scaled_speed == 0:
+            return 0
+        # Sehr kleine Geschwindigkeiten laufen bei Schrittmotoren sichtbar ruckelnd;
+        # deshalb nicht unter minimum_percent (aber nie ueber die Standard-Geschwindigkeit).
+        minimum_speed = min(self.motor_speed_configuration.minimum_percent, max_speed_percent)
+        return int(math.copysign(max(abs(scaled_speed), minimum_speed), scaled_speed))
 
     def move_axis(self, axis, speed: float):
         # Einziger Weg, auf dem Fahrbefehle zum Motor-Controller gehen (Panel, Joy-Con,

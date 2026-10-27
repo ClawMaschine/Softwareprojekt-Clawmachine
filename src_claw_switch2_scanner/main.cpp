@@ -241,12 +241,20 @@ static constexpr uint8_t JOYCON_RIGHT_A_BUTTON_MASK = 0x02;
 // Darueber wird die Auslenkung auf 0-100 % umgerechnet (Schwelle = 0 %, Anschlag
 // = 100 %), damit die Geschwindigkeit weich einsetzt.
 static constexpr int8_t JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT = 30;
+// Eine einmal erkannte Stickrichtung bleibt aktiv, bis die Auslenkung unter diese
+// (niedrigere) Schwelle faellt. Ohne diese Hysterese wechselt der Wert an der
+// Schwelle staendig zwischen 0 und klein, und die Achse zuckt.
+static constexpr int8_t JOYCON_STICK_RELEASE_THRESHOLD_PERCENT = 24;
+// Reine Wertaenderungen innerhalb einer Bewegung werden erst ab dieser Aenderung
+// (gegenueber dem zuletzt gesendeten Wert) gesendet, damit Stickrauschen keine
+// Nachrichten und keine Geschwindigkeitsspruenge am Motor erzeugt.
+static constexpr uint8_t JOYCON_MINIMUM_PERCENT_CHANGE = 3;
 // Werte werden auf Vielfache davon gerundet. 1 = volle Aufloesung; die Anzahl der
 // MQTT-Nachrichten begrenzt JOYCON_MINIMUM_PUBLISH_INTERVAL_MILLISECONDS.
 static constexpr uint8_t JOYCON_PERCENT_STEP = 1;
 // Aenderungen innerhalb der Bewegung (Wert bleibt > 0) werden hoechstens so oft
 // gesendet. Start und Stopp einer Richtung gehen immer sofort raus.
-static constexpr unsigned long JOYCON_MINIMUM_PUBLISH_INTERVAL_MILLISECONDS = 40;
+static constexpr unsigned long JOYCON_MINIMUM_PUBLISH_INTERVAL_MILLISECONDS = 100;
 // Tasten zaehlen als voll gedrueckt.
 static constexpr uint8_t JOYCON_BUTTON_PRESSED_PERCENT = 100;
 
@@ -286,6 +294,24 @@ struct JoyConControlState
            (backPercent == 0) != (other.backPercent == 0);
   }
 
+  // Groesste Aenderung einer einzelnen Richtung gegenueber other (in Prozentpunkten).
+  uint8_t largestChangeComparedTo(const JoyConControlState &other) const
+  {
+    const uint8_t changes[] = {
+        static_cast<uint8_t>(abs(static_cast<int>(upPercent) - other.upPercent)),
+        static_cast<uint8_t>(abs(static_cast<int>(downPercent) - other.downPercent)),
+        static_cast<uint8_t>(abs(static_cast<int>(leftPercent) - other.leftPercent)),
+        static_cast<uint8_t>(abs(static_cast<int>(rightPercent) - other.rightPercent)),
+        static_cast<uint8_t>(abs(static_cast<int>(frontPercent) - other.frontPercent)),
+        static_cast<uint8_t>(abs(static_cast<int>(backPercent) - other.backPercent))};
+    uint8_t largestChange = 0;
+    for (uint8_t change : changes)
+    {
+      largestChange = max(largestChange, change);
+    }
+    return largestChange;
+  }
+
   bool equals(const JoyConControlState &other) const
   {
     return upPercent == other.upPercent && downPercent == other.downPercent &&
@@ -296,15 +322,20 @@ struct JoyConControlState
 
 // Stick-Auslenkung (0-100 %) hinter der Schwelle auf 0-100 % umrechnen und auf
 // JOYCON_PERCENT_STEP runden. Unter der Schwelle 0.
-static uint8_t convertStickDeflectionToPercent(int8_t signedPercent, bool isPositiveDirection)
+// previousPercent ist der zuletzt ermittelte Wert dieser Richtung: war sie schon
+// aktiv, gilt die niedrigere Freigabeschwelle (Hysterese).
+static uint8_t convertStickDeflectionToPercent(int8_t signedPercent, bool isPositiveDirection, uint8_t previousPercent)
 {
   const int16_t directedPercent = isPositiveDirection ? signedPercent : -signedPercent;
-  if (directedPercent < JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT)
+  const int16_t activeThresholdPercent = previousPercent > 0 ? JOYCON_STICK_RELEASE_THRESHOLD_PERCENT
+                                                             : JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT;
+  if (directedPercent < activeThresholdPercent)
   {
     return 0;
   }
-  const int16_t scaledPercent = (directedPercent - JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT) * 100 /
-                                (100 - JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT);
+  // Ober- der Freigabeschwelle weiter nach der Aktivierungsschwelle skalieren; darunter 0 %
+  const int16_t scaledPercent = max<int16_t>(0, (directedPercent - JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT) * 100 /
+                                (100 - JOYCON_STICK_DIRECTION_THRESHOLD_PERCENT));
   const int16_t roundedPercent = (scaledPercent + JOYCON_PERCENT_STEP / 2) / JOYCON_PERCENT_STEP * JOYCON_PERCENT_STEP;
   return static_cast<uint8_t>(constrain(roundedPercent, 0, 100));
 }
@@ -515,6 +546,26 @@ static void resetReportTracker(ReportTracker &tracker)
 
 static constexpr size_t MAXIMUM_CONTROLLER_SESSIONS = 3;
 
+// Beschleunigung und Gyroskop aus Report 0x05 (siehe hid_reports.md im Repo
+// ndeadly/switch2_controller_research, Abschnitt "Motion Data"): ab Offset 0x2A,
+// 18 Byte. Nur vorhanden, wenn Feature-Bit 2 (IMU) aktiviert wurde.
+static constexpr size_t  MOTION_DATA_OFFSET             = 0x2A;
+static constexpr size_t  MOTION_DATA_LENGTH             = 0x12;
+static constexpr uint8_t FEATURE_FLAG_IMU               = 0x04;
+static constexpr uint8_t COMMAND_ID_FEATURE_SELECT      = 0x0C;
+static constexpr uint8_t FEATURE_SUBCOMMAND_SET_MASK    = 0x02;
+static constexpr uint8_t FEATURE_SUBCOMMAND_ENABLE      = 0x04;
+// Standardbereiche laut Doku: +-8 G, +-2000 dps, jeweils 16 Bit mit Vorzeichen.
+static constexpr float   ACCELERATION_G_PER_COUNT       = 8.0f / 32767.0f;
+static constexpr float   GYRO_DEGREES_PER_SECOND_PER_COUNT = 2000.0f / 32767.0f;
+
+struct MotionSample
+{
+  int16_t accelerationCounts[3];  // x, y, z
+  int16_t gyroCounts[3];          // x, y, z
+  volatile bool hasSample;
+};
+
 struct ControllerSession
 {
   bool                  isInUse;
@@ -527,6 +578,9 @@ struct ControllerSession
   // Trennen nur die Zeiger loeschen, niemals selbst freigeben.
   NimBLERemoteCharacteristic *commandCharacteristic;
   NimBLERemoteCharacteristic *vibrationCharacteristic;
+  NimBLERemoteCharacteristic *commonReportCharacteristic;  // Report 0x05, traegt die Motion-Daten
+  bool                        isMotionSubscribed;
+  MotionSample                latestMotion;
 
   // Befehlsantworten treffen im NimBLE-Host-Task ein und werden hier abgelegt,
   // damit Auswertung und AES im Arduino-Task laufen. Ein Slot genuegt: der
@@ -643,6 +697,9 @@ static ControllerSession *claimFreeSession(const NimBLEAddress &address)
       controllerSessions[i].type    = Switch2ControllerType::Unknown;
       controllerSessions[i].commandCharacteristic   = nullptr;
       controllerSessions[i].vibrationCharacteristic = nullptr;
+      controllerSessions[i].commonReportCharacteristic = nullptr;
+      controllerSessions[i].isMotionSubscribed      = false;
+      controllerSessions[i].latestMotion.hasSample  = false;
       controllerSessions[i].commandResponseLength   = 0;
       controllerSessions[i].hasCommandResponse      = false;
       controllerSessions[i].pairing.step            = PairingStep::Idle;
@@ -1180,10 +1237,13 @@ static JoyConControlState readControlStateFromReport(const ReportTracker &tracke
 
   // Stick und Tasten wirken zusammen: gilt der hoehere Wert (Stick nach rechts: rechts;
   // nach links: links; nach oben: hinten; nach unten: vorne).
-  state.rightPercent = max(state.rightPercent, convertStickDeflectionToPercent(horizontalPercent, true));
-  state.leftPercent  = max(state.leftPercent,  convertStickDeflectionToPercent(horizontalPercent, false));
-  state.backPercent  = max(state.backPercent,  convertStickDeflectionToPercent(verticalPercent, true));
-  state.frontPercent = max(state.frontPercent, convertStickDeflectionToPercent(verticalPercent, false));
+  const JoyConControlState &previousState = tracker.controllerType == Switch2ControllerType::JoyConLeft
+                                                ? leftControlState
+                                                : rightControlState;
+  state.rightPercent = max(state.rightPercent, convertStickDeflectionToPercent(horizontalPercent, true, previousState.rightPercent));
+  state.leftPercent  = max(state.leftPercent,  convertStickDeflectionToPercent(horizontalPercent, false, previousState.leftPercent));
+  state.backPercent  = max(state.backPercent,  convertStickDeflectionToPercent(verticalPercent, true, previousState.backPercent));
+  state.frontPercent = max(state.frontPercent, convertStickDeflectionToPercent(verticalPercent, false, previousState.frontPercent));
 
   return state;
 }
@@ -1397,11 +1457,22 @@ static void publishPendingControlState()
   // immer an.
   static unsigned long lastPublishedAtMilliseconds = 0;
   const unsigned long  nowMilliseconds             = millis();
-  if (hasPublishedOnce && !state.hasStartOrStopComparedTo(lastPublishedState) &&
-      nowMilliseconds - lastPublishedAtMilliseconds < JOYCON_MINIMUM_PUBLISH_INTERVAL_MILLISECONDS)
+  if (hasPublishedOnce && !state.hasStartOrStopComparedTo(lastPublishedState))
   {
-    hasPendingControlState = true;
-    return;
+    // Kleine Schwankungen ignorieren (Stickrauschen); sie wuerden sich am Motor
+    // nur als Geschwindigkeitssprung bemerkbar machen.
+    const uint8_t largestChange = state.largestChangeComparedTo(lastPublishedState);
+    const bool    isFullRange   = state.leftPercent == 100 || state.rightPercent == 100 ||
+                                  state.frontPercent == 100 || state.backPercent == 100;
+    if (largestChange < JOYCON_MINIMUM_PERCENT_CHANGE && !isFullRange)
+    {
+      return;
+    }
+    if (nowMilliseconds - lastPublishedAtMilliseconds < JOYCON_MINIMUM_PUBLISH_INTERVAL_MILLISECONDS)
+    {
+      hasPendingControlState = true;
+      return;
+    }
   }
   lastPublishedAtMilliseconds = nowMilliseconds;
 
@@ -1768,6 +1839,7 @@ static void connectToController(const NimBLEAddress &address)
 
   // Der Befehlskanal haengt am selben Service wie die Input-Reports.
   resolveCommandChannel(inputService, session, matchedReport);
+  session->commonReportCharacteristic = inputService->getCharacteristic(COMMON_INPUT_REPORT_UUID);
 
 #if SUBSCRIBE_TO_COMMON_INPUT_REPORT
   subscribeToReport(inputService,
@@ -1935,11 +2007,117 @@ static Switch2ScanCallbacks scanCallbacks;
 
 // --- Serielle Kommandos -----------------------------------------------------
 
+// --- Motion-Daten (Beschleunigung + Gyroskop) -------------------------------
+//
+// Befehl 'm': IMU per Befehl 0x0C (Feature Select) einschalten und Report 0x05
+// abonnieren, der die Daten in einem klar dokumentierten Format liefert. Der
+// typspezifische Report hat die Motion-Daten dagegen in einem unbekannten,
+// gepackten Format. Beides laeuft aus dem Arduino-Task (GATT-Writes).
+static bool shouldPrintMotionValues = false;
+
+static int16_t readSignedLittleEndian16(const uint8_t *bytes)
+{
+  return static_cast<int16_t>(static_cast<uint16_t>(bytes[0]) | (static_cast<uint16_t>(bytes[1]) << 8));
+}
+
+static void handleMotionReport(ControllerSession *session, const uint8_t *report, size_t length)
+{
+  if (length < MOTION_DATA_OFFSET + MOTION_DATA_LENGTH)
+  {
+    return;
+  }
+  // Aufbau: 4 Byte Zeitstempel, 2 Byte Temperatur, dann Beschleunigung X/Y/Z und Gyro X/Y/Z
+  const uint8_t *motion = &report[MOTION_DATA_OFFSET];
+  for (size_t axis = 0; axis < 3; axis++)
+  {
+    session->latestMotion.accelerationCounts[axis] = readSignedLittleEndian16(&motion[0x6 + axis * 2]);
+    session->latestMotion.gyroCounts[axis]         = readSignedLittleEndian16(&motion[0xC + axis * 2]);
+  }
+  session->latestMotion.hasSample = true;
+}
+
+static void enableMotionOnSession(ControllerSession *session)
+{
+  if (session->commandCharacteristic == nullptr || session->commonReportCharacteristic == nullptr)
+  {
+    Serial.println("[MOTION] Befehlskanal oder Report 0x05 fehlt - Motion nicht moeglich.");
+    return;
+  }
+
+  // Erst die Maske setzen, dann einschalten (Set Feature Mask muss vorher einmal
+  // aufgerufen worden sein). Die anderen Features bleiben unveraendert.
+  const uint8_t featureData[4] = {FEATURE_FLAG_IMU, 0x00, 0x00, 0x00};
+  const bool didSetMask = sendControllerCommand(session, COMMAND_ID_FEATURE_SELECT,
+                                                FEATURE_SUBCOMMAND_SET_MASK, featureData, sizeof(featureData));
+  delay(50);
+  const bool didEnable = sendControllerCommand(session, COMMAND_ID_FEATURE_SELECT,
+                                               FEATURE_SUBCOMMAND_ENABLE, featureData, sizeof(featureData));
+  Serial.printf("[MOTION] IMU einschalten: Maske %s, Aktivieren %s\n",
+                didSetMask ? "gesendet" : "FEHLGESCHLAGEN", didEnable ? "gesendet" : "FEHLGESCHLAGEN");
+
+  if (!session->isMotionSubscribed)
+  {
+    const bool didSubscribe = session->commonReportCharacteristic->subscribe(
+        true,
+        [session](NimBLERemoteCharacteristic *, uint8_t *data, size_t length, bool)
+        {
+          handleMotionReport(session, data, length);
+        });
+    session->isMotionSubscribed = didSubscribe;
+    Serial.printf("[MOTION] Report 0x05 abonnieren: %s\n", didSubscribe ? "ok" : "FEHLGESCHLAGEN");
+  }
+}
+
+static void enableMotionOnAllSessions()
+{
+  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
+  {
+    if (controllerSessions[i].isInUse)
+    {
+      enableMotionOnSession(&controllerSessions[i]);
+    }
+  }
+}
+
+// Gibt die zuletzt empfangenen Werte hoechstens alle 250 ms aus (Rohwerte und
+// umgerechnet), solange 'shouldPrintMotionValues' an ist.
+static void printMotionValuesIfDue()
+{
+  static unsigned long lastPrintedAtMilliseconds = 0;
+  if (!shouldPrintMotionValues || millis() - lastPrintedAtMilliseconds < 250)
+  {
+    return;
+  }
+  lastPrintedAtMilliseconds = millis();
+
+  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
+  {
+    const ControllerSession &session = controllerSessions[i];
+    if (!session.isInUse || !session.latestMotion.hasSample)
+    {
+      continue;
+    }
+    const MotionSample &motion = session.latestMotion;
+    Serial.printf("[MOTION] %-14s accel[G] %6.2f %6.2f %6.2f | gyro[dps] %7.1f %7.1f %7.1f | raw gyro %6d %6d %6d\n",
+                  session.specificReportTracker.controllerName != nullptr
+                      ? session.specificReportTracker.controllerName
+                      : "Controller",
+                  motion.accelerationCounts[0] * ACCELERATION_G_PER_COUNT,
+                  motion.accelerationCounts[1] * ACCELERATION_G_PER_COUNT,
+                  motion.accelerationCounts[2] * ACCELERATION_G_PER_COUNT,
+                  motion.gyroCounts[0] * GYRO_DEGREES_PER_SECOND_PER_COUNT,
+                  motion.gyroCounts[1] * GYRO_DEGREES_PER_SECOND_PER_COUNT,
+                  motion.gyroCounts[2] * GYRO_DEGREES_PER_SECOND_PER_COUNT,
+                  motion.gyroCounts[0], motion.gyroCounts[1], motion.gyroCounts[2]);
+  }
+}
+
 static void printHelp()
 {
   Serial.println("[HELP]  b = Tastennamen / rohe Bitmasken  | d = Vollhexdump an/aus");
   Serial.println("[HELP]  s = Stick-Ausgabe an/aus          | r = Referenz+Kalibrierung neu");
   Serial.println("[HELP]  v = Testvibration am rechten Joy-Con (wie ein Druck auf A)");
+  Serial.println("[HELP]  m = Motion (Beschleunigung/Gyro) einschalten, nochmal = Ausgabe an/aus");
   Serial.println("[HELP]  p = Pairing starten (Controller merkt sich diesen ESP32!)");
   Serial.println("[HELP]  h = diese Hilfe");
 }
@@ -1976,6 +2154,12 @@ static void handleSerialCommands()
         break;
       case 'r':
         resetAllTrackers();
+        break;
+      case 'm':
+        // Erster Druck schaltet die IMU an und gibt die Werte aus, danach nur noch die Ausgabe
+        enableMotionOnAllSessions();
+        shouldPrintMotionValues = !shouldPrintMotionValues;
+        Serial.printf("[CMD]   Motion-Ausgabe: %s\n", shouldPrintMotionValues ? "an" : "aus");
         break;
       case 's':
         shouldPrintStickValues = !shouldPrintStickValues;
@@ -2096,6 +2280,7 @@ void loop()
   mqttConnection.maintainConnection();
   publishPendingControlState();
   sendPendingVibration();
+  printMotionValuesIfDue();
   advancePairingSessions();
 
   if (hasPendingConnectAddress)

@@ -69,6 +69,7 @@ class MotorSpeedConfiguration:
     xy_percent: int
     z_percent: int
     claw_degrees_per_second: float
+    minimum_percent: int
 
 
 def load_motor_speed_configuration() -> MotorSpeedConfiguration:
@@ -82,7 +83,10 @@ def load_motor_speed_configuration() -> MotorSpeedConfiguration:
         "motor_speed", "claw_degrees_per_second", fallback=35.0
     )
 
+    minimum_percent = config_parser.getint("motor_speed", "minimum_percent", fallback=15)
+
     return MotorSpeedConfiguration(
+        minimum_percent=max(0, min(100, minimum_percent)),
         xy_percent=max(0, min(100, xy_percent)),
         z_percent=max(0, min(100, z_percent)),
         claw_degrees_per_second=claw_degrees_per_second,
