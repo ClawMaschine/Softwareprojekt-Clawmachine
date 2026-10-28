@@ -56,6 +56,7 @@ except ModuleNotFoundError:
         MOTOR_CONTROLLER_COMMAND_TOPIC,
         MOTOR_CONTROLLER_POSITION_TOPIC,
         MOTOR_CONTROLLER_SETTINGS_TOPIC,
+        MOTOR_CONTROLLER_ERROR_LOG_TOPIC,
         PLAYER_INPUT_JOYCON_TOPIC,
         PLAYER_INPUT_PANEL_TOPIC,
         WEB_INTERFACE_COMMAND_TOPIC,
@@ -379,7 +380,7 @@ class ClawMachine:
                     return
                 self.move_controller.update_endstop_status(endstop_state)
                 self.mqtt_client.publish(WEB_INTERFACE_ENDSTOP_TOPIC, payload_text)
-            case _ if topic == MOTOR_CONTROLLLER_ERROR_TOPIC:
+            case _ if topic == MOTOR_CONTROLLER_ERROR_LOG_TOPIC:
                 if payload_text == "need-homing":
                     print("Motor controller requested homing sequence.")
                     self.move_controller.start_homing_sequence()

@@ -113,9 +113,8 @@ void setup()
   motorControllerConnection.begin();
   motorControllerConnection.subscribe(MOTOR_COMMAND_TOPIC);
   motorControllerConnection.subscribe(MOTOR_SETTINGS_TOPIC);
-  otaUpdater.setBeforeUpdateCallback(stopAllMotorsBeforeUpdate);
-  otaUpdater.setHealthCheck(areMotorShieldsReachable);
-  otaUpdater.begin();
+  motorControllerConnection.publish(ERROR_LOG_TOPIC, "need-homing");
+
 }
 
 // Meldet die gezaehlten Schrittpositionen als JSON, z.B. {"X":1200,"Y":0,"Z":340}.
