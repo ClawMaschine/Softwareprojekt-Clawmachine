@@ -26,6 +26,8 @@ public:
   // Es gibt keine Rueckmeldung vom Motor: verlorene Schritte fallen nicht auf, die Position
   // stimmt nur bis zum naechsten Referenzieren (resetStepPosition am Endstop).
   long getStepPosition() const;
+  // Zuletzt vorgegebene Zielgeschwindigkeit in % mit Vorzeichen (unabhaengig von der Rampe).
+  int getTargetSpeedPercent() const;
   void resetStepPosition(long newStepPosition);
   // Faehrt mit der angegebenen Geschwindigkeit (Betrag in %, Richtung ergibt sich aus
   // Ziel - aktuelle Position) bis zur Zielposition und haelt dort sofort an. Jeder

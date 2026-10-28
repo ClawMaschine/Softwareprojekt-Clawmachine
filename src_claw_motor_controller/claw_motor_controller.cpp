@@ -48,6 +48,7 @@ void ClawMotorController::begin()
 
 void ClawMotorController::update()
 {
+  enforceTravelLimits();
   xMotorLeft.update();
   yMotor.update();
   xMotorRight.update();
@@ -164,6 +165,7 @@ bool ClawMotorController::zeroPosition(char axis)
       Serial.printf("[MOTOR] Unbekannte Achse: %c\n", axis);
       return false;
   }
+  isAxisReferenced[axisIndex(axis)] = true;
   Serial.printf("[MOTOR] %c: Position auf 0 gesetzt\n", axis);
   return true;
 }
@@ -237,4 +239,66 @@ bool ClawMotorController::moveClaw(const char *command)
     clawServo.setAngle(static_cast<uint8_t>(constrain(angleDegrees, 0L, 255L)));
   }
   return true;
+}
+
+int ClawMotorController::axisIndex(char axis)
+{
+  switch (axis) {
+    case 'X': return 0;
+    case 'Y': return 1;
+    case 'Z': return 2;
+    default:  return -1;
+  }
+}
+
+bool ClawMotorController::setTravelSteps(char axis, long travelSteps)
+{
+  const int index = axisIndex(axis);
+  if (index < 0) {
+    return false;
+  }
+  travelStepsByAxis[index] = max(travelSteps, 0L);
+  Serial.printf("[MOTOR] %c: Verfahrweg %ld Schritte (0 = unbegrenzt)\n", axis, travelStepsByAxis[index]);
+  return true;
+}
+
+// Vorzeichen wie in move()/getPosition(): X rechts +1, Y und Z gespiegelt.
+int ClawMotorController::getTargetDirection(char axis) const
+{
+  int targetSpeedPercent = 0;
+  switch (axis) {
+    case 'X': targetSpeedPercent = xMotorRight.getTargetSpeedPercent(); break;
+    case 'Y': targetSpeedPercent = -yMotor.getTargetSpeedPercent(); break;
+    case 'Z': targetSpeedPercent = -zMotor.getTargetSpeedPercent(); break;
+  }
+  return (targetSpeedPercent > 0) - (targetSpeedPercent < 0);
+}
+
+void ClawMotorController::enforceTravelLimits()
+{
+  const char axisNames[] = {'X', 'Y', 'Z'};
+  for (char axis : axisNames) {
+    const int index = axisIndex(axis);
+    if (!isAxisReferenced[index]) {
+      continue;
+    }
+
+    const int direction = getTargetDirection(axis);
+    const long position = getPosition(axis);
+    const long travelSteps = travelStepsByAxis[index];
+    const bool isBelowLowerLimit = direction < 0 && position <= 0;
+    const bool isAboveUpperLimit = direction > 0 && travelSteps > 0 && position >= travelSteps;
+    if (isBelowLowerLimit || isAboveUpperLimit) {
+      Serial.printf("[MOTOR] %c: Verfahrgrenze erreicht (Position %ld, Verfahrweg %ld)\n", axis, position, travelSteps);
+      stopAxisImmediately(axis);
+    }
+  }
+}
+
+void ClawMotorController::stopAllMotion()
+{
+  stopAxisImmediately('X');
+  stopAxisImmediately('Y');
+  stopAxisImmediately('Z');
+  clawServo.stopMoving();
 }

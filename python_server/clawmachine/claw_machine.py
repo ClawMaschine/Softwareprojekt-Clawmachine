@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import json
+from random import getrandbits
 import time
 from typing import Optional
 
@@ -120,6 +121,10 @@ class ClawMachine:
             username=mqtt_configuration.username,
             password=mqtt_configuration.password,
         )
+
+        self.server_id = getrandbits(
+            32
+        )  # Zufällige ID für diesen Server-Start, nur für Debug-Ausgaben
         self.mqtt_client.connect()
         motor_speed_configuration = load_motor_speed_configuration()
         self.claw_speed_degrees_per_second = (
@@ -235,31 +240,35 @@ class ClawMachine:
         # Klauen-Geschwindigkeit und Beschleunigungen liegen als Settings auf dem
         # Motor-Controller und gehen verloren, wenn dieser neu startet — deshalb beim
         # Serverstart und bei jeder (Neu-)Registrierung erneut senden.
-        payload = (
-            json.dumps(
-                {
-                    "clawSpeedDegreesPerSecond": self.claw_speed_degrees_per_second,
-                    "clawJogSpeedDegreesPerSecond": self.move_controller.motor_speed_configuration.claw_jog_degrees_per_second,
-                    "xyMaxRevolutionsPerMinute": self.move_controller.motor_speed_configuration.xy_max_revolutions_per_minute,
-                    "zMaxRevolutionsPerMinute": self.move_controller.motor_speed_configuration.z_max_revolutions_per_minute,
-                    "xTravelSteps": self.move_controller.positioning_configuration.travel_steps_by_axis[
-                        "X"
-                    ],
-                    "yTravelSteps": self.move_controller.positioning_configuration.travel_steps_by_axis[
-                        "Y"
-                    ],
-                    "zTravelSteps": self.move_controller.positioning_configuration.travel_steps_by_axis[
-                        "Z"
-                    ],
-                    "xyAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second(
-                        "X"
-                    ),
-                    "zAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second(
-                        "Z"
-                    ),
-                }
-            )
+        payload = json.dumps(
+            {
+                "clawSpeedDegreesPerSecond": self.claw_speed_degrees_per_second,
+                "clawJogSpeedDegreesPerSecond": self.move_controller.motor_speed_configuration.claw_jog_degrees_per_second,
+                "xyMaxRevolutionsPerMinute": self.move_controller.motor_speed_configuration.xy_max_revolutions_per_minute,
+                "zMaxRevolutionsPerMinute": self.move_controller.motor_speed_configuration.z_max_revolutions_per_minute,
+                "xTravelSteps": self.move_controller.positioning_configuration.travel_steps_by_axis[
+                    "X"
+                ],
+                "yTravelSteps": self.move_controller.positioning_configuration.travel_steps_by_axis[
+                    "Y"
+                ],
+                "zTravelSteps": self.move_controller.positioning_configuration.travel_steps_by_axis[
+                    "Z"
+                ],
+                "xyAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second(
+                    "X"
+                ),
+                "zAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second(
+                    "Z"
+                ),
+            }
         )
+
+        if not self.device_registry.get(MOTOR_CONTROLLER_DEVICE_NAME):
+            print(
+                f"Motor controller device '{MOTOR_CONTROLLER_DEVICE_NAME}' not registered yet. Cannot publish motor settings."
+            )
+            return
         self.mqtt_client.publish(MOTOR_CONTROLLER_SETTINGS_TOPIC, payload)
         print(
             f"Published motor settings to {MOTOR_CONTROLLER_SETTINGS_TOPIC}: {payload}"

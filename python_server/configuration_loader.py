@@ -98,6 +98,7 @@ class MotorSpeedConfiguration:
     xy_max_revolutions_per_minute: int
     z_max_revolutions_per_minute: int
     homing_percent: int
+    homing_backoff_steps: int
 
 
 def load_motor_speed_configuration() -> MotorSpeedConfiguration:
@@ -121,8 +122,10 @@ def load_motor_speed_configuration() -> MotorSpeedConfiguration:
     xy_max_revolutions_per_minute = config_parser.getint("motor_speed", "xy_max_rpm", fallback=120)
     z_max_revolutions_per_minute = config_parser.getint("motor_speed", "z_max_rpm", fallback=120)
     homing_percent = config_parser.getint("motor_speed", "homing_percent", fallback=30)
+    homing_backoff_steps = config_parser.getint("motor_speed", "homing_backoff_steps", fallback=200)
 
     return MotorSpeedConfiguration(
+        homing_backoff_steps=max(1, homing_backoff_steps),
         xy_max_revolutions_per_minute=max(1, xy_max_revolutions_per_minute),
         z_max_revolutions_per_minute=max(1, z_max_revolutions_per_minute),
         homing_percent=max(1, min(100, homing_percent)),

@@ -152,9 +152,23 @@ void publishPositionIfDue()
   hasPublishedOnce = true;
 }
 
+// Ohne MQTT-Verbindung kommen keine Stopp-Befehle mehr an: alle Achsen anhalten, sobald die
+// Verbindung wegbricht (einmalig beim Uebergang, danach kann der Server neu steuern).
+void stopAllAxesOnConnectionLoss()
+{
+  static bool wasConnected = false;
+  const bool isConnected = WiFi.status() == WL_CONNECTED && motorControllerConnection.isMqttConnected();
+  if (wasConnected && !isConnected) {
+    Serial.println("[MOTOR_CONTROLLER] MQTT-Verbindung verloren - alle Achsen gestoppt");
+    movementController.stopAllMotion();
+  }
+  wasConnected = isConnected;
+}
+
 void loop()
 {
   motorControllerConnection.maintainConnection();
+  stopAllAxesOnConnectionLoss();
   movementController.update();
   publishPositionIfDue();
 }
@@ -283,7 +297,7 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
   if (strcmp(topic, MOTOR_SETTINGS_TOPIC) == 0) {
     // JSON-Settings-Update, z.B. {"accelerationPercentPerSecond": 50} (alle Achsen), {"xyAccelerationPercentPerSecond": 50},
     // {"zAccelerationPercentPerSecond": 50}, {"xyMaxRevolutionsPerMinute": 120}, {"zMaxRevolutionsPerMinute": 120},
-    // {"clawSpeedDegreesPerSecond": 35} oder {"clawJogSpeedDegreesPerSecond": 10}
+    // {"xTravelSteps": 1200} (auch y/z) oder {"clawSpeedDegreesPerSecond": 35} oder {"clawJogSpeedDegreesPerSecond": 10}
     JsonDocument jsonDoc;
     DeserializationError error = deserializeJson(jsonDoc, message);
     if (error) {
@@ -311,6 +325,14 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
     if (jsonDoc["zMaxRevolutionsPerMinute"].is<unsigned int>()) {
       movementController.setZMaxRevolutionsPerMinute(jsonDoc["zMaxRevolutionsPerMinute"].as<uint16_t>());
       hasKnownSetting = true;
+    }
+    const char travelStepsKeys[] = {'X', 'Y', 'Z'};
+    for (char axis : travelStepsKeys) {
+      const String travelStepsKey = String((char)tolower(axis)) + "TravelSteps";
+      if (jsonDoc[travelStepsKey].is<long>()) {
+        movementController.setTravelSteps(axis, jsonDoc[travelStepsKey].as<long>());
+        hasKnownSetting = true;
+      }
     }
     if (jsonDoc["clawJogSpeedDegreesPerSecond"].is<float>()) {
       movementController.setClawJogSpeed(jsonDoc["clawJogSpeedDegreesPerSecond"].as<float>());

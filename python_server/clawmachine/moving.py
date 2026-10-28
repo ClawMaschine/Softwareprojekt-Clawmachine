@@ -46,6 +46,9 @@ class Moving:
         # Ziel einer laufenden Zielfahrt je Achse (None = keine)
         self.goto_target = {"X": None, "Y": None, "Z": None}
         self.homing_in_progress = {"X": False, "Y": False, "Z": False}
+        # Steht die Achse beim Homing-Start schon am Endstop, faehrt sie erst ein Stueck
+        # weg (homing_backoff_steps) und danach wieder hin, damit der Endstop sauber ausloest.
+        self.homing_backing_off = {"X": False, "Y": False, "Z": False}
         # Zuletzt an den Motor-Controller gesendete Geschwindigkeit je Achse — damit
         # eine Achse sofort gestoppt werden kann, wenn waehrend der Fahrt ihr Endstop
         # ausloest.
@@ -62,6 +65,9 @@ class Moving:
                 continue
             is_triggered = endstop_state[field] == 1
             self.endstop_status[axis] = 0 if is_triggered else 1
+            if is_triggered and self.homing_backing_off[axis]:
+                # Der Endstop meldet noch, waehrend die Achse sich erst davon entfernt.
+                continue
             if is_triggered and self.homing_in_progress.get(axis):
                 self.__finish_homing(axis)
                 continue
@@ -105,6 +111,7 @@ class Moving:
         # laufendes Homing wird verworfen und alle Achsen halten an.
         for axis in HOMING_SEQUENCE:
             self.homing_in_progress[axis] = False
+            self.homing_backing_off[axis] = False
             self.goto_target[axis] = None
             self.is_referenced[axis] = False
             if self.commanded_speed[axis] != 0:
@@ -122,10 +129,37 @@ class Moving:
         if self.__endstop_reached(axis):
             # Das Endstop-Board meldet nur Aenderungen: steht die Achse schon am
             # Endstop, kommt keine Meldung mehr, die das Homing abschliessen wuerde.
-            self.__finish_homing(axis)
+            # Deshalb ein Stueck wegfahren und danach erneut auf den Endstop zu.
+            self.__start_homing_backoff(axis)
             return True
         self.__send_axis_speed(axis, -self.motor_speed_configuration.homing_percent)
         return True
+
+    def __start_homing_backoff(self, axis):
+        backoff_steps = self.motor_speed_configuration.homing_backoff_steps
+        homing_percent = self.motor_speed_configuration.homing_percent
+        print(f"[MOVING] Achse {axis} steht am Endstop — fahre {backoff_steps} Schritte weg")
+        self.homing_backing_off[axis] = True
+        # Stellung gilt kurz als 0, damit der Motor-Controller die Wegstrecke zaehlen kann;
+        # referenziert ist die Achse erst, wenn der Endstop wieder erreicht wurde.
+        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"zero:{axis}")
+        self.step_position[axis] = 0
+        self.goto_target[axis] = backoff_steps
+        self.commanded_speed[axis] = homing_percent
+        self.mqtt_client.publish(
+            MOTOR_CONTROLLER_COMMAND_TOPIC, f"goto:{axis}:{backoff_steps}:{homing_percent}"
+        )
+
+    def __finish_homing_backoff(self, axis):
+        self.homing_backing_off[axis] = False
+        if self.__endstop_reached(axis):
+            # Endstop meldet nach dem Wegfahren immer noch "erreicht": Mechanik, Verkabelung
+            # oder Richtung pruefen. Nicht blind gegen den Anschlag fahren.
+            print(f"[MOVING] Homing {axis} abgebrochen — Endstop loest sich beim Wegfahren nicht")
+            self.homing_in_progress[axis] = False
+            return
+        print(f"[MOVING] Achse {axis} weggefahren — fahre zum Homing zurueck auf den Endstop")
+        self.__send_axis_speed(axis, -self.motor_speed_configuration.homing_percent)
 
     def __endstop_reached(self, axis):
         return self.endstop_status.get(axis, 1) == 0
@@ -238,11 +272,15 @@ class Moving:
                 print(f"[MOVING] Achse {axis} an Position {target} angekommen")
                 self.goto_target[axis] = None
                 self.commanded_speed[axis] = 0
+                if self.homing_backing_off[axis]:
+                    self.__finish_homing_backoff(axis)
 
     def on_motor_controller_restarted(self):
         # Ein neu gestarteter Motor-Controller zaehlt wieder ab 0, egal wo die Achsen stehen.
         for axis in self.step_position:
             self.is_referenced[axis] = False
+            self.homing_in_progress[axis] = False
+            self.homing_backing_off[axis] = False
             self.goto_target[axis] = None
             self.commanded_speed[axis] = 0
 
@@ -287,6 +325,6 @@ class Moving:
 
     def cancel_goto(self):
         for axis, target in self.goto_target.items():
-            if target is not None:
+            if target is not None and not self.homing_backing_off[axis]:
                 self.goto_target[axis] = None
                 self.__stop_axis_immediately(axis)

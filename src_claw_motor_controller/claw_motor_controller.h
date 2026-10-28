@@ -32,6 +32,12 @@ public:
   bool zeroPosition(char axis);
   // Faehrt eine Achse mit speedPercent (Betrag) zur Position in Schritten und haelt dort an.
   bool moveToPosition(char axis, long steps, int speedPercent);
+  // Verfahrweg einer Achse in Schritten (0 = unbegrenzt). Gilt erst, wenn die Achse
+  // referenziert ist (zero:<Achse> empfangen); dann haelt der Controller die Achse selbst
+  // bei 0 und beim Verfahrweg an, unabhaengig vom Server.
+  bool setTravelSteps(char axis, long travelSteps);
+  // Haelt alle Achsen sofort an und bricht Zielfahrten und Klauen-Jog ab (z.B. bei MQTT-Abbruch).
+  void stopAllMotion();
   // Beschleunigung in Prozentpunkten Geschwindigkeit pro Sekunde (0 = keine Rampe),
   // getrennt fuer die X/Y-Achsen und die Z-Achse. setAcceleration() setzt beide.
   void setAcceleration(float percentPerSecond);
@@ -47,6 +53,13 @@ public:
   void setClawJogSpeed(float degreesPerSecond);
 
 private:
+  static int axisIndex(char axis);
+  // Richtung der Zielgeschwindigkeit einer Achse im Koordinatensystem des Servers (-1, 0, +1).
+  int getTargetDirection(char axis) const;
+  void enforceTravelLimits();
+
+  long travelStepsByAxis[3] = {0, 0, 0};
+  bool isAxisReferenced[3]  = {false, false, false};
 
 
   static ClawMotorController *instance;

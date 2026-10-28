@@ -37,6 +37,11 @@ long ClawStepperMotor::getStepPosition() const
   return stepPosition;
 }
 
+int ClawStepperMotor::getTargetSpeedPercent() const
+{
+  return targetSpeedPercent;
+}
+
 void ClawStepperMotor::resetStepPosition(long newStepPosition)
 {
   stepPosition = newStepPosition;
