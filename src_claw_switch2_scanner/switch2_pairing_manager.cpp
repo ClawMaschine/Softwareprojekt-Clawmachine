@@ -22,14 +22,94 @@ static Preferences pairingStorage;
 
 static constexpr const char *PAIRING_STORAGE_NAMESPACE = "switch2";
 
+// Die Arduino-Preferences-API kann Schluessel nicht aufzaehlen. Damit sich
+// nachsehen und loeschen laesst, was gespeichert ist, wird die Liste der
+// gekoppelten Adressen unter einem festen Schluessel mitgefuehrt - als rohe
+// 6-Byte-Adressen hintereinander. Vier Plaetze reichen fuer zwei Joy-Cons mit
+// Luft; der Name beginnt mit einem Unterstrich, damit er nie mit einer
+// Adresshexkette kollidiert.
+static constexpr const char *PAIRED_ADDRESS_LIST_KEY   = "_paired";
+static constexpr size_t      MAXIMUM_STORED_PAIRINGS   = 4;
+
+// Ein nur lesender Preferences-Zugriff auf einen Namensraum, den es noch nicht
+// gibt, scheitert mit "nvs_open failed: NOT_FOUND" - und die Arduino-Huelle
+// protokolliert das selbst als Fehler. Da jeder Scan eines fremd gekoppelten
+// Controllers nachsieht, ob wir ihn kennen, stand diese Zeile sonst dauernd im
+// Log und sah nach einem Defekt aus. Einmal schreibend oeffnen legt den
+// Namensraum an, danach ist Ruhe.
+void beginPairingStorage()
+{
+  pairingStorage.begin(PAIRING_STORAGE_NAMESPACE, false);
+  pairingStorage.end();
+}
+
 // NVS-Schluessel duerfen hoechstens 15 Zeichen lang sein. Die Adresse als
 // Hexkette ohne Trenner braucht genau 12.
-static void buildStorageKey(const NimBLEAddress &address, char *keyBuffer, size_t keyBufferLength)
+static void buildStorageKeyFromBytes(const uint8_t *addressBytes,
+                                     char          *keyBuffer,
+                                     size_t         keyBufferLength)
 {
-  const uint8_t *addressBytes = address.getVal();
   snprintf(keyBuffer, keyBufferLength, "%02x%02x%02x%02x%02x%02x",
            addressBytes[5], addressBytes[4], addressBytes[3],
            addressBytes[2], addressBytes[1], addressBytes[0]);
+}
+
+static void buildStorageKey(const NimBLEAddress &address, char *keyBuffer, size_t keyBufferLength)
+{
+  buildStorageKeyFromBytes(address.getVal(), keyBuffer, keyBufferLength);
+}
+
+// Anzahl der gelesenen Adressen. buffer muss MAXIMUM_STORED_PAIRINGS Adressen
+// aufnehmen koennen.
+static size_t loadPairedAddressList(uint8_t *buffer)
+{
+  pairingStorage.begin(PAIRING_STORAGE_NAMESPACE, true);
+  // isKey() zuerst, aus demselben Grund wie in loadLongTermKey: auf einem
+  // frischen Board gibt es die Liste noch nicht, und getBytes() wuerde das
+  // als Fehler protokollieren.
+  const size_t readBytes =
+      pairingStorage.isKey(PAIRED_ADDRESS_LIST_KEY)
+          ? pairingStorage.getBytes(PAIRED_ADDRESS_LIST_KEY, buffer,
+                                    MAXIMUM_STORED_PAIRINGS * BLUETOOTH_ADDRESS_LENGTH)
+          : 0;
+  pairingStorage.end();
+
+  return readBytes / BLUETOOTH_ADDRESS_LENGTH;
+}
+
+// Haelt die Adressliste aktuell. Eine schon gelistete Adresse wird nicht
+// doppelt eingetragen, damit erneutes Koppeln die Liste nicht fuellt.
+static void rememberPairedAddress(const NimBLEAddress &address)
+{
+  uint8_t addressList[MAXIMUM_STORED_PAIRINGS * BLUETOOTH_ADDRESS_LENGTH] = {0};
+  size_t  addressCount = loadPairedAddressList(addressList);
+
+  for (size_t i = 0; i < addressCount; i++)
+  {
+    if (memcmp(&addressList[i * BLUETOOTH_ADDRESS_LENGTH], address.getVal(),
+               BLUETOOTH_ADDRESS_LENGTH) == 0)
+    {
+      return;
+    }
+  }
+
+  if (addressCount >= MAXIMUM_STORED_PAIRINGS)
+  {
+    // Aeltesten Eintrag verdraengen: der Platz ist begrenzt, und die zuletzt
+    // gekoppelten Controller sind die, die gebraucht werden.
+    memmove(addressList, &addressList[BLUETOOTH_ADDRESS_LENGTH],
+            (MAXIMUM_STORED_PAIRINGS - 1) * BLUETOOTH_ADDRESS_LENGTH);
+    addressCount = MAXIMUM_STORED_PAIRINGS - 1;
+  }
+
+  memcpy(&addressList[addressCount * BLUETOOTH_ADDRESS_LENGTH], address.getVal(),
+         BLUETOOTH_ADDRESS_LENGTH);
+  addressCount++;
+
+  pairingStorage.begin(PAIRING_STORAGE_NAMESPACE, false);
+  pairingStorage.putBytes(PAIRED_ADDRESS_LIST_KEY, addressList,
+                          addressCount * BLUETOOTH_ADDRESS_LENGTH);
+  pairingStorage.end();
 }
 
 static void storeLongTermKey(const NimBLEAddress &address, const uint8_t *longTermKey)
@@ -41,6 +121,8 @@ static void storeLongTermKey(const NimBLEAddress &address, const uint8_t *longTe
   const size_t written = pairingStorage.putBytes(storageKey, longTermKey, PAIRING_KEY_LENGTH);
   pairingStorage.end();
 
+  rememberPairedAddress(address);
+
   Serial.printf("[PAIR]  LTK unter '%s' gespeichert (%u Byte).\n",
                 storageKey, static_cast<unsigned>(written));
 }
@@ -51,10 +133,119 @@ static bool loadLongTermKey(const NimBLEAddress &address, uint8_t *longTermKey)
   buildStorageKey(address, storageKey, sizeof(storageKey));
 
   pairingStorage.begin(PAIRING_STORAGE_NAMESPACE, true);
-  const size_t read = pairingStorage.getBytes(storageKey, longTermKey, PAIRING_KEY_LENGTH);
+  // Erst fragen, ob der Schluessel ueberhaupt existiert. getBytes() auf einen
+  // fehlenden Schluessel protokolliert die Arduino-Huelle selbst als Fehler
+  // ("nvs_get_blob len fail ... NOT_FOUND"), und weil bei jedem Scan eines
+  // fremd gekoppelten Controllers nachgesehen wird, stand diese Zeile sonst
+  // dauernd im Log und sah nach einem Defekt aus. isKey() ist still.
+  const bool   hasKey = pairingStorage.isKey(storageKey);
+  const size_t read   = hasKey ? pairingStorage.getBytes(storageKey, longTermKey, PAIRING_KEY_LENGTH) : 0;
   pairingStorage.end();
 
   return read == PAIRING_KEY_LENGTH;
+}
+
+// --- Kopplungen abfragen, anzeigen, loeschen --------------------------------
+
+bool hasStoredPairing(const NimBLEAddress &address)
+{
+  uint8_t longTermKey[PAIRING_KEY_LENGTH];
+  return loadLongTermKey(address, longTermKey);
+}
+
+void printStoredPairings()
+{
+  uint8_t      addressList[MAXIMUM_STORED_PAIRINGS * BLUETOOTH_ADDRESS_LENGTH] = {0};
+  const size_t addressCount = loadPairedAddressList(addressList);
+
+  if (addressCount == 0)
+  {
+    Serial.println("[PAIR]  Keine gespeicherte Kopplung. Sync-Taste lang druecken,");
+    Serial.println("[PAIR]  verbinden lassen und dann 'p' druecken.");
+    return;
+  }
+
+  Serial.printf("[PAIR]  %u gespeicherte Kopplung(en):\n", static_cast<unsigned>(addressCount));
+  for (size_t i = 0; i < addressCount; i++)
+  {
+    const uint8_t *addressBytes = &addressList[i * BLUETOOTH_ADDRESS_LENGTH];
+
+    char storageKey[16];
+    buildStorageKeyFromBytes(addressBytes, storageKey, sizeof(storageKey));
+
+    uint8_t      longTermKey[PAIRING_KEY_LENGTH];
+    pairingStorage.begin(PAIRING_STORAGE_NAMESPACE, true);
+    // Auch hier isKey() zuerst: genau der Fall "Adresse gelistet, LTK fehlt"
+    // wird unten gemeldet, und er soll als Hinweis erscheinen und nicht als
+    // Fehlerzeile der Preferences-Huelle.
+    const size_t keyLength =
+        pairingStorage.isKey(storageKey)
+            ? pairingStorage.getBytes(storageKey, longTermKey, PAIRING_KEY_LENGTH)
+            : 0;
+    pairingStorage.end();
+
+    Serial.printf("[PAIR]    %02x:%02x:%02x:%02x:%02x:%02x  LTK %s\n",
+                  addressBytes[5], addressBytes[4], addressBytes[3],
+                  addressBytes[2], addressBytes[1], addressBytes[0],
+                  keyLength == PAIRING_KEY_LENGTH ? "vorhanden" : "FEHLT");
+  }
+  Serial.println("[PAIR]  Diese Controller sollten sich auf einen Tastendruck melden.");
+
+  // Der zweite Speicher: applyStoredPairing legt den LTK zusaetzlich in den
+  // Schluesselspeicher von NimBLE. Ohne diese Zeile waere der unsichtbar -
+  // und eine Abweichung zwischen beiden Zahlen ist genau die Spur, die man
+  // bei einem Reconnect sucht, der nicht klappt.
+  Serial.printf("[PAIR]  NimBLE haelt %d Bond(s) im eigenen Schluesselspeicher.\n",
+                NimBLEDevice::getNumBonds());
+}
+
+void clearStoredPairings()
+{
+  // Zuerst den Controllern sagen, dass sie uns vergessen sollen - danach ist
+  // der Befehlskanal vielleicht nicht mehr erreichbar.
+  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
+  {
+    ControllerSession *session = &controllerSessions[i];
+    if (session->isInUse && session->commandCharacteristic != nullptr)
+    {
+      clearControllerPairingInfo(session);
+    }
+  }
+
+  uint8_t      addressList[MAXIMUM_STORED_PAIRINGS * BLUETOOTH_ADDRESS_LENGTH] = {0};
+  const size_t addressCount = loadPairedAddressList(addressList);
+
+  pairingStorage.begin(PAIRING_STORAGE_NAMESPACE, false);
+  for (size_t i = 0; i < addressCount; i++)
+  {
+    char storageKey[16];
+    buildStorageKeyFromBytes(&addressList[i * BLUETOOTH_ADDRESS_LENGTH],
+                             storageKey, sizeof(storageKey));
+    pairingStorage.remove(storageKey);
+  }
+  pairingStorage.remove(PAIRED_ADDRESS_LIST_KEY);
+  pairingStorage.end();
+
+  Serial.printf("[PAIR]  %u Kopplung(en) aus unserem Speicher geloescht.\n",
+                static_cast<unsigned>(addressCount));
+
+  // Die wichtigste Stelle: applyStoredPairing schreibt den LTK ueber
+  // ble_store_write_peer_sec/our_sec in den Schluesselspeicher von NimBLE.
+  // Bleibt er dort stehen, versucht NimBLE bei einer spaeteren Verbindung mit
+  // einem veralteten Schluessel zu verschluesseln - und der Controller trennt.
+  // Unseren Namensraum zu leeren hat ohne das nur halb gewirkt.
+  const int bondCount = NimBLEDevice::getNumBonds();
+  if (NimBLEDevice::deleteAllBonds())
+  {
+    Serial.printf("[PAIR]  %d NimBLE-Bond(s) geloescht.\n", bondCount);
+  }
+  else
+  {
+    Serial.println("[PAIR]  ACHTUNG: NimBLE-Bonds konnten nicht geloescht werden.");
+  }
+
+  Serial.println("[PAIR]  Zum Wiederverbinden ist jetzt wieder der lange Sync-Druck");
+  Serial.println("[PAIR]  und 'p' noetig.");
 }
 
 // --- Gespeicherte Kopplung nutzen -------------------------------------------
@@ -73,12 +264,12 @@ static bool loadLongTermKey(const NimBLEAddress &address, uint8_t *longTermKey)
 // Secure Connections. Das ist die uebliche Kodierung fuer einen Schluessel
 // ohne Legacy-Aushandlung. Passt sie nicht, lehnt der Controller die
 // Verschluesselung ab - sichtbar als sofortige Trennung nach dem Verbinden.
-void applyStoredPairing(NimBLEClient *client, const NimBLEAddress &address)
+bool applyStoredPairing(NimBLEClient *client, const NimBLEAddress &address)
 {
   uint8_t longTermKey[PAIRING_KEY_LENGTH];
   if (!loadLongTermKey(address, longTermKey))
   {
-    return;  // Nie gekoppelt - wie bisher unverschluesselt weiterarbeiten.
+    return false;  // Nie gekoppelt - wie bisher unverschluesselt weiterarbeiten.
   }
 
   struct ble_store_value_sec securityValue;
@@ -100,12 +291,13 @@ void applyStoredPairing(NimBLEClient *client, const NimBLEAddress &address)
   {
     Serial.printf("[PAIR]  LTK konnte nicht hinterlegt werden (peer=%d, own=%d).\n",
                   peerStatus, ownStatus);
-    return;
+    return false;
   }
 
   const int securityStatus = ble_gap_security_initiate(client->getConnHandle());
   Serial.printf("[PAIR]  Gespeicherte Kopplung genutzt, Verschluesselung angestossen (status=%d).\n",
                 securityStatus);
+  return securityStatus == 0;
 }
 
 // --- Pairing-Antrieb --------------------------------------------------------
@@ -161,8 +353,6 @@ void startPairingForConnectedControllers()
 
 void advancePairingSessions()
 {
-  const uint32_t nowMs = millis();
-
   for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
   {
     ControllerSession *session = &controllerSessions[i];
@@ -201,6 +391,10 @@ void advancePairingSessions()
       }
     }
 
-    checkPairingTimeout(session->pairing, nowMs);
+    // Uhr hier ablesen und nicht am Schleifenanfang: zwischendurch kann eine
+    // Antwort verarbeitet (AES!) und die naechste Anfrage gesendet worden
+    // sein. Mit einer aelteren Uhrzeit laege die Anfrage in der Zukunft und
+    // der Schritt waere sofort "abgelaufen".
+    checkPairingTimeout(session->pairing, millis());
   }
 }

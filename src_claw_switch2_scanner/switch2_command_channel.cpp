@@ -93,3 +93,167 @@ void sendPendingVibration()
                 controllerName,
                 didWrite ? "gesendet" : "FEHLGESCHLAGEN");
 }
+
+// --- Player-LEDs ------------------------------------------------------------
+
+// Das LED-Muster ist der einzige Befehl, den diese Firmware unaufgefordert
+// gleich nach dem Verbinden schickt. Seit er drin war, bricht die Verbindung
+// nach 2-3 s mit einer Supervision-Timeout ab (reason=520) - und der
+// Projektbericht hat die Verbindung vorher ausdruecklich als "stabil ueber
+// 10 s" abgenommen (Abschnitt 8, Kriterium 2). Dass der Befehl ankommt und
+// bleibenden Zustand aendert, ist am Geraet zu sehen: die LEDs blieben
+// danach dunkel.
+//
+// Deshalb standardmaessig AUS. Die Verbindung hat Vorrang vor der Beleuchtung.
+// 'l' setzt das Muster von Hand, 'L' schaltet die Automatik ein, falls sich
+// der Verdacht erledigt.
+static bool isAutomaticPlayerLedOn = false;
+
+void setAutomaticPlayerLedEnabled(bool isEnabled)
+{
+  isAutomaticPlayerLedOn = isEnabled;
+}
+
+bool isAutomaticPlayerLedEnabled()
+{
+  return isAutomaticPlayerLedOn;
+}
+
+uint8_t playerLedPatternForType(Switch2ControllerType type)
+{
+  if (type == Switch2ControllerType::JoyConLeft)
+  {
+    return PLAYER_LED_PATTERN_JOYCON_LEFT;
+  }
+  if (type == Switch2ControllerType::JoyConRight)
+  {
+    return PLAYER_LED_PATTERN_JOYCON_RIGHT;
+  }
+  // Unbekannter Typ: alle vier an, damit ueberhaupt etwas Festes leuchtet.
+  return 0x0F;
+}
+
+// Setzt NUR das Muster. Das Blinken wird hier bewusst nicht mitgeschaltet:
+// vorher tat diese Funktion beides, und damit liess sich ein einmal
+// abgeschaltetes Blinken mit keinem Kommando mehr zurueckholen - auch 'o'
+// hat es jedes Mal wieder ausgeschaltet. Genau das war der Grund, warum ein
+// Controller ohne jede Lichtreaktion dastand.
+bool setPlayerLedPattern(ControllerSession *session, uint8_t ledBitmask)
+{
+  const uint8_t patternData[PLAYER_LED_DATA_LENGTH] = {ledBitmask};
+  if (!sendControllerCommand(session,
+                             COMMAND_ID_PLAYER_LED,
+                             PLAYER_LED_SUBCOMMAND_SET_PATTERN,
+                             patternData,
+                             sizeof(patternData)))
+  {
+    Serial.println("[LED]   Muster konnte nicht gesetzt werden.");
+    return false;
+  }
+
+  Serial.printf("[LED]   Muster 0x%02X gesetzt.\n", static_cast<unsigned>(ledBitmask));
+  return true;
+}
+
+// Blinken des aktuellen Musters an oder aus (Command 0x09/0x08). Das
+// Gegenstueck zum Abschalten - und die einzige Moeglichkeit, es
+// zurueckzuholen.
+bool setPlayerLedFlashing(ControllerSession *session, bool shouldFlash)
+{
+  // Zwei Befehle unmittelbar hintereinander koennten den Controller
+  // ueberfahren - die Konsole schickt sie im Mitschnitt auch nicht in
+  // derselben Millisekunde. Ein kurzer Abstand kostet nichts.
+  delay(20);
+
+  const uint8_t flashData[PLAYER_LED_DATA_LENGTH] = {shouldFlash ? uint8_t{0x01} : uint8_t{0x00}};
+  const bool    didWrite = sendControllerCommand(session,
+                                                 COMMAND_ID_PLAYER_LED,
+                                                 PLAYER_LED_SUBCOMMAND_FLASH,
+                                                 flashData,
+                                                 sizeof(flashData));
+  Serial.printf("[LED]   Blinken %s: %s\n",
+                shouldFlash ? "an" : "aus",
+                didWrite ? "gesendet" : "FEHLGESCHLAGEN");
+  return didWrite;
+}
+
+// Setzt bei allen verbundenen Controllern ein Muster. ledBitmask = 0 bedeutet
+// "jeder bekommt sein eigenes" (links die erste LED, rechts die zweite).
+static void setPlayerLedsForConnectedControllers(uint8_t ledBitmask)
+{
+  size_t setCount = 0;
+  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
+  {
+    ControllerSession *session = &controllerSessions[i];
+    if (!session->isInUse || session->commandCharacteristic == nullptr)
+    {
+      continue;
+    }
+
+    const uint8_t pattern = ledBitmask != 0 ? ledBitmask : playerLedPatternForType(session->type);
+    if (setPlayerLedPattern(session, pattern))
+    {
+      // Festes Muster heisst: nicht blinken, sonst sieht es nach
+      // Pairing-Modus aus.
+      setPlayerLedFlashing(session, false);
+      setCount++;
+    }
+  }
+
+  if (setCount == 0)
+  {
+    Serial.println("[LED]   Kein verbundener Controller mit Befehlskanal - nichts zu tun.");
+  }
+}
+
+void setPlayerLedsForConnectedControllers()
+{
+  setPlayerLedsForConnectedControllers(0);
+}
+
+// Alle vier LEDs an. Zweierlei Zweck: die Leuchten eines Controllers
+// zurueckholen, bei dem ein frueher gesetztes Muster haengt, und pruefen, ob
+// der LED-Befehl ueberhaupt greift - vier leuchtende LEDs sind nicht zu
+// uebersehen.
+//
+// Dunkle LEDs an einem GETRENNTEN Joy-Con muessen uebrigens nicht an uns
+// liegen: ein Joy-Con ohne Verbindung schlaft ein und schaltet sie selbst ab.
+void turnOnAllPlayerLeds()
+{
+  size_t setCount = 0;
+  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
+  {
+    ControllerSession *session = &controllerSessions[i];
+    if (!session->isInUse || session->commandCharacteristic == nullptr)
+    {
+      continue;
+    }
+
+    if (setPlayerLedPattern(session, PLAYER_LED_PATTERN_ALL))
+    {
+      // Hier ausdruecklich MIT Blinken: dieser Befehl ist der Rueckweg aus
+      // einem Controller, dem wir die Lichtrueckmeldung abgeschaltet haben.
+      setPlayerLedFlashing(session, true);
+      setCount++;
+    }
+  }
+
+  if (setCount == 0)
+  {
+    Serial.println("[LED]   Kein verbundener Controller mit Befehlskanal - nichts zu tun.");
+  }
+}
+
+// --- Kopplungsspeicher des Controllers --------------------------------------
+
+bool clearControllerPairingInfo(ControllerSession *session)
+{
+  const bool didWrite = sendControllerCommand(session,
+                                              COMMAND_ID_INITIALISATION,
+                                              INITIALISATION_SUBCOMMAND_CLEAR_PAIRING_INFO,
+                                              nullptr,
+                                              0);
+  Serial.printf("[PAIR]  Kopplung im Controller verwerfen: %s\n",
+                didWrite ? "gesendet" : "FEHLGESCHLAGEN");
+  return didWrite;
+}

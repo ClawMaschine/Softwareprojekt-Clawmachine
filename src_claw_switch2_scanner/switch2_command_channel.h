@@ -44,3 +44,47 @@ void requestVibration(Switch2ControllerType type);
 
 // Gehoert in den loop(). Sendet eine vorgemerkte Vibration, falls eine ansteht.
 void sendPendingVibration();
+
+// --- Player-LEDs ------------------------------------------------------------
+//
+// Im Pairing-Modus laeuft das Licht ueber die vier LEDs. Ein festes Muster
+// beendet das und zeigt an, dass der Controller bedient wird statt auf
+// Kopplung zu warten. Wie alle Schreibbefehle nur aus dem Arduino-Task.
+
+// Welches Muster zu welchem Controller gehoert: links die erste LED, rechts
+// die zweite.
+uint8_t playerLedPatternForType(Switch2ControllerType type);
+
+// Ob beim Verbinden von selbst ein Muster gesetzt wird. **Standard aus**: der
+// Befehl ist der einzige unaufgeforderte direkt nach dem Verbinden und der
+// Hauptverdaechtige fuer die Abbrueche nach 2-3 s (reason=520) - der
+// Projektbericht hatte die Verbindung vorher als "stabil ueber 10 s"
+// abgenommen. Mit 'L' einschaltbar, falls sich der Verdacht erledigt.
+void setAutomaticPlayerLedEnabled(bool isEnabled);
+bool isAutomaticPlayerLedEnabled();
+
+// Setzt NUR das Muster. Das Blinken schaltet setPlayerLedFlashing() - bewusst
+// getrennt: vorher tat setPlayerLedPattern() beides, und ein abgeschaltetes
+// Blinken liess sich mit keinem Kommando mehr zurueckholen.
+bool setPlayerLedPattern(ControllerSession *session, uint8_t ledBitmask);
+
+// Blinken des aktuellen Musters an/aus (Command 0x09/0x08).
+bool setPlayerLedFlashing(ControllerSession *session, bool shouldFlash);
+
+// Fuer alle verbundenen Controller, jeder mit seinem eigenen Muster
+// (serielles Kommando 'l').
+void setPlayerLedsForConnectedControllers();
+
+// Alle vier LEDs an UND Blinken wieder einschalten (serielles Kommando 'o').
+// Das ist der Rueckweg aus einem Controller, dem wir die Lichtrueckmeldung
+// abgeschaltet haben, und zugleich der Nachweis, dass der Befehl ankommt.
+// Dunkle LEDs an einem GETRENNTEN Joy-Con muessen nicht an uns liegen: ohne
+// Verbindung schlaeft er ein und schaltet sie selbst ab.
+void turnOnAllPlayerLeds();
+
+// --- Kopplungsspeicher des Controllers --------------------------------------
+
+// Laesst den Controller die gespeicherte Kopplung verwerfen - das Gegenstueck
+// zum Loeschen auf unserer Seite. Dokumentiert (Command 0x03/0x08), aber im
+// Mitschnitt der Konsole nicht belegt.
+bool clearControllerPairingInfo(ControllerSession *session);

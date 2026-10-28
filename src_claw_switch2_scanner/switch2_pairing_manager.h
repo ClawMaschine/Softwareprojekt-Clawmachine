@@ -21,11 +21,33 @@
 // eigene Befehlsschnittstelle aus statt ueber SMP.
 // ============================================================================
 
+// Gehoert in setup(), vor jedem anderen Aufruf dieses Moduls. Legt den
+// NVS-Namensraum an, falls er noch fehlt - sonst protokolliert jeder lesende
+// Zugriff darauf einen NOT_FOUND-Fehler, der wie ein Defekt aussieht.
+void beginPairingStorage();
+
 // Beim Verbinden aufrufen. Liegt zu dieser Adresse ein gespeicherter LTK vor,
 // wird er in den Schluesselspeicher des Hosts gelegt und die Verschluesselung
 // angestossen. Ohne gespeicherte Kopplung passiert nichts - ein
 // Verschluesselungsversuch auf gut Glueck wuerde die Trennung ausloesen.
-void applyStoredPairing(NimBLEClient *client, const NimBLEAddress &address);
+//
+// true = es lag eine Kopplung vor und die Verschluesselung wurde angestossen.
+// Der Aufrufer muss dann warten, bis sie steht, bevor er den GATT-Baum
+// abfragt: ein wiederverbundener Controller erwartet die Verschluesselung.
+bool applyStoredPairing(NimBLEClient *client, const NimBLEAddress &address);
+
+// Liegt zu dieser Adresse eine Kopplung im Speicher? Fuer die Ausgabe beim
+// Scannen - ein Controller, der auf einen fremden Host zeigt, obwohl wir ihn
+// gespeichert haben, wurde anderswo neu gekoppelt.
+bool hasStoredPairing(const NimBLEAddress &address);
+
+// Serielles Kommando 'k': auflisten, was gespeichert ist. Bei einem Reconnect,
+// der nicht klappt, ist das die erste Frage.
+void printStoredPairings();
+
+// Serielles Kommando 'x': alles vergessen - hier und, soweit erreichbar, auch
+// im Controller selbst.
+void clearStoredPairings();
 
 // Startet den Handshake fuer alle verbundenen Controller mit Befehlskanal.
 // Bewusst nur auf ausdruecklichen Wunsch (serielles Kommando 'p'): ein
