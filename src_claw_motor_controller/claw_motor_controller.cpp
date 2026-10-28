@@ -2,6 +2,11 @@
 
 ClawMotorController *ClawMotorController::instance = nullptr;
 
+// Position 0 ist der Punkt, an dem beim Referenzieren der Endstop gemeldet wurde. Beim erneuten
+// Anfahren (Homing nach dem Wegfahren) muss die Achse diesen Punkt erreichen koennen, damit der
+// Endstop sicher ausloest — deshalb stoppt der ESP erst ein Stueck dahinter.
+static constexpr long LOWER_LIMIT_OVERRUN_STEPS = 100;
+
 ClawMotorController::ClawMotorController(
     ClawMqttConnection &connection,
     uint8_t motorShieldAI2cAddress,
@@ -286,7 +291,7 @@ void ClawMotorController::enforceTravelLimits()
     const int direction = getTargetDirection(axis);
     const long position = getPosition(axis);
     const long travelSteps = travelStepsByAxis[index];
-    const bool isBelowLowerLimit = direction < 0 && position <= 0;
+    const bool isBelowLowerLimit = direction < 0 && position <= -LOWER_LIMIT_OVERRUN_STEPS;
     const bool isAboveUpperLimit = direction > 0 && travelSteps > 0 && position >= travelSteps;
     if (isBelowLowerLimit || isAboveUpperLimit) {
       Serial.printf("[MOTOR] %c: Verfahrgrenze erreicht (Position %ld, Verfahrweg %ld)\n", axis, position, travelSteps);

@@ -113,8 +113,6 @@ void setup()
   motorControllerConnection.begin();
   motorControllerConnection.subscribe(MOTOR_COMMAND_TOPIC);
   motorControllerConnection.subscribe(MOTOR_SETTINGS_TOPIC);
-  motorControllerConnection.publish(ERROR_LOG_TOPIC, "need-homing");
-
 }
 
 // Meldet die gezaehlten Schrittpositionen als JSON, z.B. {"X":1200,"Y":0,"Z":340}.
@@ -164,9 +162,22 @@ void stopAllAxesOnConnectionLoss()
   wasConnected = isConnected;
 }
 
+// Nach jedem Start ist die Position unbekannt: sobald MQTT steht, einmalig das Homing anfordern.
+// In setup() ginge das nicht, dort ist noch keine Verbindung da und publish() verwirft die Nachricht.
+void requestHomingOnceConnected()
+{
+  static bool hasRequestedHoming = false;
+  if (hasRequestedHoming || !motorControllerConnection.isMqttConnected()) {
+    return;
+  }
+  motorControllerConnection.publish(ERROR_LOG_TOPIC, "need-homing");
+  hasRequestedHoming = true;
+}
+
 void loop()
 {
   motorControllerConnection.maintainConnection();
+  requestHomingOnceConnected();
   stopAllAxesOnConnectionLoss();
   movementController.update();
   publishPositionIfDue();

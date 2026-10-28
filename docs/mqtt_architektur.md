@@ -104,7 +104,7 @@ Richtung: **→ Broker** = Publisher, **← Broker** = Subscriber. `<name>` = Cl
 | `clawmachine/<name>/status` | ESP → Server, Webinterface | Text `online` / `offline` | ja | `online` beim Verbinden, `offline` als Last Will (QoS 1). Webinterface sendet das gleiche für sich selbst |
 | `clawmachine/<name>/metadata/uptime` | ESP → Server, Webinterface | Text, Millisekunden seit Boot (z. B. `123456`) | nein | alle 5 s |
 | `clawmachine/<name>/registered` | Server → Gerät | Text `ok` | nein | einmalig, wenn der Server ein Gerät zum ersten Mal sieht (automatische Registrierung) |
-| `clawmachine/<name>/error_log` | ESP → Webinterface (Server wertet es nicht aus) | JSON `{"device","topic","payload","error"}` | nein | Motor-Controller meldet unverarbeitbare Befehle (ungültiges JSON, unbekannte Achse/Klauen-Aktion, keine Zahl). `payload` ist auf 100 Zeichen gekürzt. Der Emulator sendet jede Sekunde den Text `Emulated ESP is running.` |
+| `clawmachine/<name>/error_log` | ESP → Server und Webinterface (der Server wertet nur `need-homing` aus) | JSON `{"device","topic","payload","error"}` | nein | Motor-Controller meldet einmalig nach dem Start `need-homing` (Server startet das Homing) sowie unverarbeitbare Befehle (ungültiges JSON, unbekannte Achse/Klauen-Aktion, keine Zahl). `payload` ist auf 100 Zeichen gekürzt. Der Emulator sendet jede Sekunde den Text `Emulated ESP is running.` |
 
 Es gibt kein Anmelde-Topic: ein Gerät gilt als registriert, sobald es auf `status` oder `metadata/uptime` auftaucht.
 Browser-Clients (`<name>` beginnt mit `claw_web_interface_`) werden bewusst nicht in die Geräteliste aufgenommen.
@@ -203,7 +203,7 @@ Auffälligkeiten:
 ## 6. Abweichungen und tote Reste im Code
 
 - `include/firmware_config.h`: `CLAW_DEVICE_ADDED_TOPIC "clawmachine/device/added"` ist ein Rest der alten Anmeldung und wird nicht mehr genutzt.
-- `error_log` und `ota/status` werden vom Server nicht ausgewertet, nur vom Webinterface (über `clawmachine/#`) bzw. `ota_update.py` gelesen.
+- `ota/status` wird vom Server nicht ausgewertet, `error_log` nur für `need-homing`; gelesen werden sie außerdem vom Webinterface (über `clawmachine/#`) bzw. `ota_update.py`.
 - Die Topic-Doku in `CLAUDE.md` nennt noch `clawmachine/joycon`, `claw/uptime_*` und ein Joy-Con-Classic-Bluetooth-Setup. Das ist überholt: der Joy-Con läuft über `player_input/joycon`, Uptime über `<name>/metadata/uptime`.
 - Homing startet beim Serverstart, (erst, wenn Motor-Controller und Endstop-Board online sind) und per Webinterface-Befehl `home`.
 - Zwei Server mit der Client-ID `server` verdrängen sich gegenseitig vom Broker ("session taken over").
