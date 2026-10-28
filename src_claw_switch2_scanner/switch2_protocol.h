@@ -120,3 +120,37 @@ static constexpr uint8_t VIBRATION_SAMPLE_FOR_BUTTON_FEEDBACK = VIBRATION_SAMPLE
 
 // Sample-ID plus drei ungenutzte Bytes.
 static constexpr size_t VIBRATION_SAMPLE_DATA_LENGTH = 4;
+
+// --- Player-LEDs ------------------------------------------------------------
+//
+// Im Pairing-Modus laeuft das Licht ueber die vier LEDs. Setzt der Host ein
+// festes Muster, hoert das auf - das ist die sichtbare Bestaetigung, dass der
+// Controller nicht mehr auf Kopplung wartet, sondern bedient wird.
+
+static constexpr uint8_t COMMAND_ID_PLAYER_LED = 0x09;
+
+// Subcommand 0x07 nimmt ein Bitmuster (Bits 0-3 = die vier LEDs), 0x08
+// schaltet das Blinken des aktuellen Musters ein oder aus.
+static constexpr uint8_t PLAYER_LED_SUBCOMMAND_SET_PATTERN = 0x07;
+static constexpr uint8_t PLAYER_LED_SUBCOMMAND_FLASH       = 0x08;
+
+// Je ein Byte: das Muster bzw. der Ein/Aus-Wert.
+static constexpr size_t PLAYER_LED_DATA_LENGTH = 1;
+
+// Links die erste LED, rechts die zweite - so sind die beiden Joy-Cons am
+// Geraet auseinanderzuhalten.
+static constexpr uint8_t PLAYER_LED_PATTERN_JOYCON_LEFT  = 0x01;
+static constexpr uint8_t PLAYER_LED_PATTERN_JOYCON_RIGHT = 0x02;
+
+// Alle vier an - nicht zu uebersehen und damit der Nachweis, dass der Befehl
+// ueberhaupt greift.
+static constexpr uint8_t PLAYER_LED_PATTERN_ALL = 0x0F;
+
+// --- Kopplungsspeicher des Controllers --------------------------------------
+//
+// Command 0x03 ist die Initialisierungsgruppe. Subcommand 0x08 verwirft die im
+// Controller gespeicherte Kopplung - das Gegenstueck zum Loeschen auf unserer
+// Seite, damit der Controller nicht weiter einen Host sucht, der ihn vergessen
+// hat.
+static constexpr uint8_t COMMAND_ID_INITIALISATION                     = 0x03;
+static constexpr uint8_t INITIALISATION_SUBCOMMAND_CLEAR_PAIRING_INFO  = 0x08;
