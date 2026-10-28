@@ -19,6 +19,7 @@ void resetReportTracker(ReportTracker &tracker)
   tracker.hasStickCenter         = false;
   tracker.hasPrintedDeflection   = false;
   tracker.receivedReportCount    = 0;
+  tracker.lastActivityAtMs       = millis();
   memset(tracker.byteChangeCount, 0, sizeof(tracker.byteChangeCount));
   memset(tracker.isNoisyByte, 0, sizeof(tracker.isNoisyByte));
 }
@@ -141,10 +142,45 @@ static void finishNoiseLearning(ReportTracker &tracker)
 
   if (tracker.stickCenterSampleCount > 0)
   {
-    tracker.stickCenter.x =
+    const uint16_t measuredCenterX =
         static_cast<uint16_t>(tracker.stickCenterSumX / tracker.stickCenterSampleCount);
-    tracker.stickCenter.y =
+    const uint16_t measuredCenterY =
         static_cast<uint16_t>(tracker.stickCenterSumY / tracker.stickCenterSampleCount);
+
+    // Die Mittellage wird gemittelt, waehrend der Controller ruhig liegen
+    // soll. Wird dabei am Stick gewackelt, kommt eine Mitte heraus, die weit
+    // neben der Wahrheit liegt - und danach faehrt die Achse im Ruhezustand
+    // dauerhaft los, weil der Scheinausschlag ueber der Richtungsschwelle
+    // liegt. Das ist am Geraet passiert (gemessen 0xA39 statt rund 0x800) und
+    // waere an der Maschine ein sich selbst bewegender Greifer.
+    const int16_t deviationX =
+        static_cast<int16_t>(measuredCenterX) - static_cast<int16_t>(STICK_THEORETICAL_CENTER);
+    const int16_t deviationY =
+        static_cast<int16_t>(measuredCenterY) - static_cast<int16_t>(STICK_THEORETICAL_CENTER);
+    const bool isPlausible =
+        deviationX > -STICK_CENTER_PLAUSIBLE_DEVIATION_COUNTS &&
+        deviationX < STICK_CENTER_PLAUSIBLE_DEVIATION_COUNTS &&
+        deviationY > -STICK_CENTER_PLAUSIBLE_DEVIATION_COUNTS &&
+        deviationY < STICK_CENTER_PLAUSIBLE_DEVIATION_COUNTS;
+
+    if (isPlausible)
+    {
+      tracker.stickCenter.x = measuredCenterX;
+      tracker.stickCenter.y = measuredCenterY;
+    }
+    else
+    {
+      // Nicht die unglaubwuerdige Messung uebernehmen, aber auch nicht den
+      // Stick totstellen: die theoretische Mitte ist hoechstens rund 100
+      // Zaehlwerte daneben und damit brauchbar, bis neu vermessen wird.
+      tracker.stickCenter.x = STICK_THEORETICAL_CENTER;
+      tracker.stickCenter.y = STICK_THEORETICAL_CENTER;
+      Serial.printf("[BASE]  %s: ACHTUNG, gemessene Stick-Mitte x=0x%03X y=0x%03X ist\n",
+                    tracker.controllerName, measuredCenterX, measuredCenterY);
+      Serial.println("[BASE]  unglaubwuerdig - am Stick wurde waehrend der Lernphase gewackelt.");
+      Serial.println("[BASE]  Ersatzweise 0x800. Bitte 'r' druecken und den Stick dabei LOSLASSEN,");
+      Serial.println("[BASE]  sonst faehrt die Achse im Ruhezustand von selbst.");
+    }
     tracker.hasStickCenter = true;
   }
 
@@ -195,8 +231,12 @@ void reportChangedBytes(const ReportTracker &tracker, const uint8_t *report, siz
     const uint8_t previousValue = tracker.previousReport[i];
     const uint8_t currentValue  = report[i];
 
+    // Byte 0x01 ist der Akkustand, nicht Tastatur. Es wird als [AKKU]
+    // ausgegeben und gehoert aus demselben Grund wie die Stickbytes nicht in
+    // die Diff-Ausgabe: es ist im Ruhezustand stabil und saehe bei einer
+    // Aenderung wie ein Tastendruck aus.
     if (currentValue == previousValue || tracker.isNoisyByte[i] ||
-        isPartOfKnownStickField(tracker, i))
+        i == JOYCON_POWER_INFO_BYTE || isPartOfKnownStickField(tracker, i))
     {
       continue;
     }

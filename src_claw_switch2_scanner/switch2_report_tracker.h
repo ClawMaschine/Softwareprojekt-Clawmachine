@@ -79,6 +79,11 @@ struct ReportTracker
   bool            hasPrintedDeflection;
 
   uint32_t receivedReportCount;
+
+  // Wann wurde dieser Controller zuletzt wirklich bedient - Taste oder Stick,
+  // nicht blosses Eintreffen von Reports (die kommen 30 mal pro Sekunde, auch
+  // wenn er nur daliegt). Daran haengt das Trennen unberuehrter Verbindungen.
+  uint32_t lastActivityAtMs;
 };
 
 // Setzt die Messung zurueck. Die beim Abonnieren gesetzten Felder
