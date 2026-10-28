@@ -35,11 +35,13 @@ def parse_device_name(topic: str, *sub_parts: str) -> Optional[str]:
 CONTROL_TOPIC = build_topic("claw")
 
 # Server -> Motor-Controller
-MOTOR_CONTROLLER_COMMAND_TOPIC = device_topic("motor_controller", "motor", "command")
+MOTOR_CONTROLLER_COMMAND_TOPIC = device_topic(
+    "claw_motor_controller", "motor", "command"
+)
 # JSON-Settings-Update (z.B. Beschleunigung), getrennt von den Bewegungsbefehlen
-MOTOR_CONTROLLER_SETTINGS_TOPIC = device_topic("motor_controller", "settings")
+MOTOR_CONTROLLER_SETTINGS_TOPIC = device_topic("claw_motor_controller", "settings")
 # Motor-Controller -> Server: gezaehlte Schrittpositionen {"X":..,"Y":..,"Z":..}
-MOTOR_CONTROLLER_POSITION_TOPIC = device_topic("motor_controller", "position")
+MOTOR_CONTROLLER_POSITION_TOPIC = device_topic("claw_motor_controller", "position")
 
 # Eingabegeräte -> Server
 PLAYER_INPUT_PANEL_TOPIC = device_topic("player_input", "panel")

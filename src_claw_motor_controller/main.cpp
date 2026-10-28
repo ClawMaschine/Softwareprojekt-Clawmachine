@@ -7,10 +7,10 @@
 #include "firmware_config.h"
 #include <ArduinoJson.h>
 
-static constexpr const char *MOTOR_COMMAND_TOPIC  = "clawmachine/motor_controller/motor/command";
-static constexpr const char *MOTOR_SETTINGS_TOPIC = "clawmachine/motor_controller/settings";
-static constexpr const char *ERROR_LOG_TOPIC      = "clawmachine/motor_controller/error_log";
-static constexpr const char *POSITION_TOPIC       = "clawmachine/motor_controller/position";
+static constexpr const char *MOTOR_COMMAND_TOPIC  = "clawmachine/claw_motor_controller/motor/command";
+static constexpr const char *MOTOR_SETTINGS_TOPIC = "clawmachine/claw_motor_controller/settings";
+static constexpr const char *ERROR_LOG_TOPIC      = "clawmachine/claw_motor_controller/error_log";
+static constexpr const char *POSITION_TOPIC       = "clawmachine/claw_motor_controller/position";
 // Position hoechstens so oft melden, solange sie sich aendert; ohne Aenderung als
 // Lebenszeichen alle paar Sekunden (der Server erkennt daran einen Neustart nicht,
 // aber hat nach seinem eigenen Neustart schnell wieder einen Wert).

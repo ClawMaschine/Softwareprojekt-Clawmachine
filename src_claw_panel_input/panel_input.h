@@ -9,7 +9,8 @@ struct PanelInput {
     bool right_button   = false;
     bool front_button   = false;
     bool back_button    = false;
-    int claw           = 0;  // Klauen-Poti in Prozent (0-100)
+    int claw           = 0;  // Klauen-Poti in Prozent (0-100), mit Totzone gegen Rauschen
+    bool hasClawReading = false;
 
     void begin();
     void read();

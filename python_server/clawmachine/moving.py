@@ -117,6 +117,7 @@ class Moving:
             return False
 
         print(f"[MOVING] Starte Homing fuer Achse {axis}")
+
         self.homing_in_progress[axis] = True
         if self.__endstop_reached(axis):
             # Das Endstop-Board meldet nur Aenderungen: steht die Achse schon am
@@ -256,11 +257,15 @@ class Moving:
                 print(f"[MOVING] Zielfahrt abgelehnt — unbekannte Achse {axis}")
                 return False
             if not self.is_referenced[axis]:
-                print(f"[MOVING] Zielfahrt abgelehnt — Achse {axis} nicht referenziert (erst Homing)")
+                print(
+                    f"[MOVING] Zielfahrt abgelehnt — Achse {axis} nicht referenziert (erst Homing)"
+                )
                 return False
             travel_steps = self.positioning_configuration.travel_steps_by_axis[axis]
             if target < 0 or (travel_steps > 0 and target > travel_steps):
-                print(f"[MOVING] Zielfahrt abgelehnt — {axis}={target} ausserhalb 0..{travel_steps or 'unbegrenzt'}")
+                print(
+                    f"[MOVING] Zielfahrt abgelehnt — {axis}={target} ausserhalb 0..{travel_steps or 'unbegrenzt'}"
+                )
                 return False
 
         goto_percent = self.positioning_configuration.goto_percent
@@ -268,7 +273,9 @@ class Moving:
             if target == self.step_position[axis]:
                 continue
             direction = 1 if target > self.step_position[axis] else -1
-            print(f"[MOVING] Fahre Achse {axis} von {self.step_position[axis]} zu {target}")
+            print(
+                f"[MOVING] Fahre Achse {axis} von {self.step_position[axis]} zu {target}"
+            )
             self.goto_target[axis] = target
             # Wie eine normale Fahrt vermerkt, damit der Endstop sie bei negativer
             # Richtung auch hier sofort stoppt.

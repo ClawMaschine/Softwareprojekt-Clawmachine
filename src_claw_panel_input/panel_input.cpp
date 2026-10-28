@@ -4,6 +4,11 @@
 // 12-Bit-ADC des ESP32
 static constexpr int ANALOG_READ_MAXIMUM = 4095;
 
+// Das Poti rauscht um 1-2 Prozent (z.B. 38, 37, 38, 37 ...). Ein neuer Wert gilt erst,
+// wenn er mindestens so weit vom zuletzt gemeldeten abweicht. Die Endlagen 0 und 100
+// werden trotzdem immer erreicht.
+static constexpr int CLAW_DEADZONE_PERCENT = 3;
+
 void PanelInput::begin()
 {
     pinMode(CLAW_PANEL_PIN_UP,      INPUT_PULLUP);
@@ -28,7 +33,13 @@ void PanelInput::read()
     // Ganze Prozent daempfen zugleich das ADC-Rauschen, das sonst bei jedem Lesen
     // eine neue MQTT-Nachricht ausloesen wuerde.
     const int potentiometer_value = analogRead(CLAW_PANEL_PIN_POTENTIOMETER);
-    claw = constrain(map(potentiometer_value, 0, ANALOG_READ_MAXIMUM, 0, 100), 0, 100);
+    const int measuredClawPercent = constrain(map(potentiometer_value, 0, ANALOG_READ_MAXIMUM, 0, 100), 0, 100);
+    const bool isOutsideDeadzone = abs(measuredClawPercent - claw) >= CLAW_DEADZONE_PERCENT;
+    const bool isEndPosition     = measuredClawPercent == 0 || measuredClawPercent == 100;
+    if (!hasClawReading || isOutsideDeadzone || (isEndPosition && measuredClawPercent != claw)) {
+        claw = measuredClawPercent;
+        hasClawReading = true;
+    }
 }
 
 bool PanelInput::isValid() const

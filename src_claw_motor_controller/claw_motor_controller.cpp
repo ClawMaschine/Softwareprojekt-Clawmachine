@@ -44,13 +44,6 @@ void ClawMotorController::begin()
   yMotor.setAcceleration(xyAccelerationPercentPerSecond);
   xMotorRight.setAcceleration(xyAccelerationPercentPerSecond);
   zMotor.setAcceleration(zAccelerationPercentPerSecond);
-
-  // Permanenter Log, damit sich "wird die Beschleunigung wirklich genutzt?"
-  // direkt am Serial-Monitor beim Booten beantworten laesst, ohne den Code
-  // lesen zu muessen. 0 heisst: kein Ramping, Geschwindigkeit springt sofort.
-  Serial.printf("[MOTOR] Beschleunigung X/Y: %.1f %%/s, Z: %.1f %%/s\n",
-                xyAccelerationPercentPerSecond, zAccelerationPercentPerSecond);
-
 }
 
 void ClawMotorController::update()
