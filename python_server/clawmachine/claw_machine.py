@@ -258,7 +258,7 @@ class ClawMachine:
                         "Z"
                     ),
                 }
-            ),
+            )
         )
         self.mqtt_client.publish(MOTOR_CONTROLLER_SETTINGS_TOPIC, payload)
         print(
