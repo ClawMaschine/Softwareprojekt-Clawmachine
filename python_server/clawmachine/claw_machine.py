@@ -470,6 +470,7 @@ class ClawMachine:
                         # Online wie offline: nach einem Neustart zaehlt der Motor-Controller
                         # wieder ab 0, die Position gilt erst nach erneutem Homing.
                         self.move_controller.on_motor_controller_restarted()
+                        self.publish_motor_settings()
                     device = self.ensure_device_registered(esp_name)
                     if device is not None:
                         device.is_online = payload_text == "online"

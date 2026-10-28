@@ -138,7 +138,9 @@ class Moving:
     def __start_homing_backoff(self, axis):
         backoff_steps = self.motor_speed_configuration.homing_backoff_steps
         homing_percent = self.motor_speed_configuration.homing_percent
-        print(f"[MOVING] Achse {axis} steht am Endstop — fahre {backoff_steps} Schritte weg")
+        print(
+            f"[MOVING] Achse {axis} steht am Endstop — fahre {backoff_steps} Schritte weg"
+        )
         self.homing_backing_off[axis] = True
         # Stellung gilt kurz als 0, damit der Motor-Controller die Wegstrecke zaehlen kann;
         # referenziert ist die Achse erst, wenn der Endstop wieder erreicht wurde.
@@ -147,7 +149,8 @@ class Moving:
         self.goto_target[axis] = backoff_steps
         self.commanded_speed[axis] = homing_percent
         self.mqtt_client.publish(
-            MOTOR_CONTROLLER_COMMAND_TOPIC, f"goto:{axis}:{backoff_steps}:{homing_percent}"
+            MOTOR_CONTROLLER_COMMAND_TOPIC,
+            f"goto:{axis}:{backoff_steps}:{homing_percent}",
         )
 
     def __finish_homing_backoff(self, axis):
@@ -155,10 +158,14 @@ class Moving:
         if self.__endstop_reached(axis):
             # Endstop meldet nach dem Wegfahren immer noch "erreicht": Mechanik, Verkabelung
             # oder Richtung pruefen. Nicht blind gegen den Anschlag fahren.
-            print(f"[MOVING] Homing {axis} abgebrochen — Endstop loest sich beim Wegfahren nicht")
+            print(
+                f"[MOVING] Homing {axis} abgebrochen — Endstop loest sich beim Wegfahren nicht"
+            )
             self.homing_in_progress[axis] = False
             return
-        print(f"[MOVING] Achse {axis} weggefahren — fahre zum Homing zurueck auf den Endstop")
+        print(
+            f"[MOVING] Achse {axis} weggefahren — fahre zum Homing zurueck auf den Endstop"
+        )
         self.__send_axis_speed(axis, -self.motor_speed_configuration.homing_percent)
 
     def __endstop_reached(self, axis):
@@ -277,6 +284,7 @@ class Moving:
 
     def on_motor_controller_restarted(self):
         # Ein neu gestarteter Motor-Controller zaehlt wieder ab 0, egal wo die Achsen stehen.
+
         for axis in self.step_position:
             self.is_referenced[axis] = False
             self.homing_in_progress[axis] = False
