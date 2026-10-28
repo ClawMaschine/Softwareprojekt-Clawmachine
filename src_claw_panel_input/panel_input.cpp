@@ -1,6 +1,9 @@
 #include "panel_input.h"
 #include "firmware_config.h"
 
+// 12-Bit-ADC des ESP32
+static constexpr int ANALOG_READ_MAXIMUM = 4095;
+
 void PanelInput::begin()
 {
     pinMode(CLAW_PANEL_PIN_UP,      INPUT_PULLUP);
@@ -21,10 +24,11 @@ void PanelInput::read()
     right_button   = digitalRead(CLAW_PANEL_PIN_RIGHT)   == LOW;
     front_button   = digitalRead(CLAW_PANEL_PIN_FRONT)   == LOW;
     back_button    = digitalRead(CLAW_PANEL_PIN_BACK)    == LOW;
-    // Poti statt Taster: unterhalb der Schwelle greifen, oberhalb loslassen
+    // Poti als Klauen-Stellung in Prozent (0-100) statt als roher ADC-Wert (0-4095).
+    // Ganze Prozent daempfen zugleich das ADC-Rauschen, das sonst bei jedem Lesen
+    // eine neue MQTT-Nachricht ausloesen wuerde.
     const int potentiometer_value = analogRead(CLAW_PANEL_PIN_POTENTIOMETER);
-    claw    = potentiometer_value;
-    
+    claw = constrain(map(potentiometer_value, 0, ANALOG_READ_MAXIMUM, 0, 100), 0, 100);
 }
 
 bool PanelInput::isValid() const
