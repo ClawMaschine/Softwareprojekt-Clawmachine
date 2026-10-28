@@ -250,7 +250,14 @@ bool checkPairingTimeout(Switch2PairingSession &session, uint32_t nowMs)
   {
     return false;
   }
-  if ((nowMs - session.lastRequestAtMs) < PAIRING_RESPONSE_TIMEOUT_MS)
+  // Vorzeichenbehaftet vergleichen. Steht lastRequestAtMs ein paar
+  // Millisekunden in der ZUKUNFT - weil der Aufrufer seine Uhr vor dem Senden
+  // der naechsten Anfrage abgelesen hat - dann ergibt die vorzeichenlose
+  // Subtraktion knapp 4,3 Milliarden und damit sofort einen Timeout. Genau das
+  // ist passiert: Schritt 4 wurde abgebrochen, obwohl der Controller
+  // ordnungsgemaess geantwortet hat. Dasselbe Muster wie beim Backoff in
+  // switch2_connection.cpp.
+  if (static_cast<int32_t>(nowMs - session.lastRequestAtMs) < PAIRING_RESPONSE_TIMEOUT_MS)
   {
     return false;
   }
