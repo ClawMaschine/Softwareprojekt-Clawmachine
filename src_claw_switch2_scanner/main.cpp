@@ -1,6 +1,7 @@
 #include <Arduino.h>
 
 #include "joycon_control_output.h"
+#include "joycon_power_status.h"
 #include "switch2_command_channel.h"
 #include "switch2_controller_types.h"
 #include "switch2_connection.h"
@@ -35,7 +36,9 @@
 //   switch2_pairing_manager.*    Handshake ausfuehren, LTK in NVS behalten
 //   switch2_pairing.*            das Pairing-Protokoll, ohne Bluetooth
 //   joycon_control_output.*      MQTT an den Python-Server
-//   switch2_command_channel.*    Befehle senden, Vibration
+//   endstop_feedback.*           Vibration bei ausgeloestem Endstop
+//   joycon_power_status.*        Akkustand melden, wenn er sich aendert
+//   switch2_command_channel.*    Befehle senden, Vibration, Player-LEDs
 //   switch2_session.*            was wir ueber eine offene Verbindung wissen
 //   switch2_report_tracker.*     Rauschlernen, Kalibrierung, Diff-Ausgabe
 //   switch2_report_parser.*      Bytes -> Stickwerte und Tastenzustaende
@@ -74,13 +77,35 @@
 // ein ungekoppelter Host Schreibbefehle setzen darf - Voraussetzung fuer den
 // Pairing-Handshake.
 //
+// Ist ein Controller einmal gekoppelt, genuegt danach ein Tastendruck an ihm:
+// er sucht dann uns als Host, und der Scan laesst ihn durch (isAddressedToUs in
+// switch2_connection.cpp). Der lange Sync-Druck ist nur fuer das erste Koppeln
+// noetig.
+//
+// Das Player-LED-Muster, das das Pairing-Lauflicht beenden soll, wird derzeit
+// NICHT von selbst gesetzt: seit es drin war, brach die Verbindung nach 2-3 s
+// mit reason=520 ab, obwohl der Projektbericht sie vorher als "stabil ueber
+// 10 s" abgenommen hatte. Mit 'l' von Hand setzen, mit 'L' die Automatik
+// einschalten - siehe switch2_command_channel.h.
+//
 // Serielle Kommandos zur Laufzeit (kein Neuflashen noetig):
 //   b = Tastennamen / rohe Bitmasken
 //   d = kompletten Hexdump jedes Reports an/aus
 //   r = Referenzwerte und Rauschliste zuruecksetzen (Controller ruhig halten)
 //   s = Stick-Dekodierung an/aus
 //   v = Testvibration am rechten Joy-Con ausloesen
+//   a = Akkustand beider Controller ausgeben
+//   l = Player-LEDs setzen (LED-Belegung pruefen)
+//   o = alle vier LEDs an (Leuchten zurueckholen)
+//   L = LED-Muster beim Verbinden an/aus (Standard aus, Begruendung oben)
 //   p = Pairing-Handshake starten (siehe switch2_pairing.h)
+//   k = gespeicherte Kopplungen und NimBLE-Bonds auflisten
+//   x = alles austragen: unser Speicher, NimBLE-Bonds, Scan-Wartezeiten
+//       und der Befehl an den Controller, uns zu vergessen
+//   m = Netzwerk an/aus - testen ohne Broker, WiFi wird dabei abgeschaltet
+//   w = 20 s lang jedes Advertisement ausgeben (wirkt der Sync-Druck?)
+//   f = einmal trotz fremder Host-Adresse verbinden (blockt der Filter?)
+//   i = Trennen unberuehrter Controller an/aus (Standard an, nach 3 Minuten)
 //   h = Hilfe
 // ============================================================================
 
@@ -91,7 +116,14 @@ static void printHelp()
   Serial.println("[HELP]  b = Tastennamen / rohe Bitmasken  | d = Vollhexdump an/aus");
   Serial.println("[HELP]  s = Stick-Ausgabe an/aus          | r = Referenz+Kalibrierung neu");
   Serial.println("[HELP]  v = Testvibration am rechten Joy-Con (wie ein Druck auf A)");
+  Serial.println("[HELP]  a = Akkustand beider Controller   | l = Player-LEDs setzen");
+  Serial.println("[HELP]  o = alle LEDs an (zurueckholen)   | L = LED beim Verbinden an/aus");
   Serial.println("[HELP]  p = Pairing starten (Controller merkt sich diesen ESP32!)");
+  Serial.println("[HELP]  k = Kopplungen + NimBLE-Bonds zeigen | x = alles austragen");
+  Serial.println("[HELP]  m = Netzwerk an/aus (ohne Broker testen, BLE allein auf der Antenne)");
+  Serial.println("[HELP]  w = 20 s jedes Advertisement zeigen (Sync-Druck pruefen)");
+  Serial.println("[HELP]  f = einmal trotz fremder Host-Adresse verbinden (Filter pruefen)");
+  Serial.println("[HELP]  i = unberuehrte Controller nach 3 min trennen an/aus");
   Serial.println("[HELP]  h = diese Hilfe");
 }
 
@@ -133,11 +165,61 @@ static void handleSerialCommands()
         requestVibration(Switch2ControllerType::JoyConRight);
         Serial.println("[CMD]   Testvibration angefordert.");
         break;
+      case 'a':
+        printPowerStatusNow();
+        break;
+      case 'l':
+        // Zum Nachpruefen der LED-Belegung am Geraet. Beim Verbinden passiert
+        // das ohnehin von selbst.
+        setPlayerLedsForConnectedControllers();
+        break;
+      case 'L':
+        // Zum Eingrenzen von Verbindungsabbruechen: das LED-Muster ist der
+        // einzige Befehl, der unaufgefordert direkt nach dem Verbinden geht.
+        setAutomaticPlayerLedEnabled(!isAutomaticPlayerLedEnabled());
+        Serial.printf("[CMD]   LED-Muster beim Verbinden: %s\n",
+                      isAutomaticPlayerLedEnabled() ? "an" : "aus");
+        break;
       case 'p':
         // Bewusst nur auf ausdruecklichen Wunsch: ein Joy-Con hat genau einen
         // Host. Nach dem Pairing verbindet er sich nicht mehr mit der Switch,
         // bis er dort neu gekoppelt wird.
         startPairingForConnectedControllers();
+        break;
+      case 'k':
+        printStoredPairings();
+        break;
+      case 'f':
+        // Einmal trotz fremder Host-Adresse verbinden - der entscheidende
+        // Versuch, ob der Filter oder der Controller blockt.
+        forceNextConnectAttempt();
+        break;
+      case 'w':
+        // Beobachtungsfenster: jedes Advertisement wird ausgegeben. Zum
+        // Nachsehen, ob ein Sync-Druck etwas aendert.
+        startVerboseScanWindow();
+        break;
+      case 'i':
+        setIdleDisconnectEnabled(!isIdleDisconnectEnabled());
+        break;
+      case 'm':
+        // Ohne Broker testen: WiFi ganz aus, Steuerbefehle nur noch als
+        // [OFFLINE] auf der Konsole. Auch das Mittel, um einen
+        // Verbindungsabbruch von einem Antennenproblem zu trennen.
+        setNetworkOutputEnabled(!isNetworkOutputEnabled());
+        break;
+      case 'o':
+        // Holt die Leuchten zurueck, wenn ein gesetztes Muster haengt, und
+        // zeigt, ob der LED-Befehl ueberhaupt ankommt.
+        turnOnAllPlayerLeds();
+        break;
+      case 'x':
+        // Vollstaendig austragen. Die Scan-Wartezeiten gehoeren dazu, werden
+        // aber hier aufgehoben und nicht im Pairing-Modul: das liegt unter
+        // switch2_connection und darf es nicht kennen. main.cpp ist die
+        // Verdrahtungsebene.
+        clearStoredPairings();
+        forgetTrackedDevices();
         break;
       case 'h':
         printHelp();
@@ -162,17 +244,43 @@ void setup()
   beginControlOutput();
 
   beginControllerConnections();
+
+  // Muss vor jedem Lesen des Kopplungsspeichers kommen.
+  beginPairingStorage();
+
+  // Sagt gleich beim Start, ob ein Controller sich von selbst melden kann oder
+  // ob erst noch gekoppelt werden muss.
+  printStoredPairings();
 }
 
 void loop()
 {
   handleSerialCommands();
+
+  // Zuerst verbinden, erst danach Netzwerk: ein vorgemerkter Controller ist
+  // zeitkritisch, MQTT ist es nicht.
+  //
+  // Ein gekoppelter Controller bewirbt sich nach einem Tastendruck nur in
+  // einem kurzen Fenster und hoert auch nur kurz auf eine Verbindung. Stand
+  // connectPendingController() am Ende der Schleife, lag davor
+  // maintainControlOutput() - und das kann Sekunden blockieren:
+  // ensureWifiConnected() in der gemeinsamen Library wartet in einer Schleife
+  // bis zu 10 s auf WiFi, und jeder Broker-Versuch ist ein blockierender
+  // TCP-Connect. Bis wir den Verbindungsaufbau endlich starteten, war das
+  // Fenster zu, und connect() lief in eine Zeitueberschreitung
+  // (lastError=520).
+  //
+  // Mit gedrueckter Sync-Taste fiel das nie auf: im Pairing-Modus bewirbt sich
+  // der Controller minutenlang, da ist eine Verzoegerung von Sekunden
+  // gleichgueltig. Nur der Tastendruck-Reconnect ist darauf angewiesen.
+  connectPendingController();
+
   maintainControlOutput();
   publishPendingControlState();
+  publishPendingPowerStatus();
   sendPendingVibration();
   advancePairingSessions();
-
-  connectPendingController();
+  disconnectIdleControllers();
 
   delay(10);
 }
