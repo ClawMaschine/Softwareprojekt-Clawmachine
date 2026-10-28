@@ -50,6 +50,19 @@ struct ControllerSession
 extern ControllerSession controllerSessions[MAXIMUM_CONTROLLER_SESSIONS];
 
 ControllerSession *findSessionByAddress(const NimBLEAddress &address);
+
+// Zu welcher Sitzung gehoert dieser Tracker? Jede Sitzung besitzt ihre eigenen
+// Tracker, die Zuordnung ist also eindeutig.
+//
+// Gebraucht wird sie, weil der Controllertyp als Schluessel NICHT genuegt: es
+// koennen zwei LINKE Joy-Cons gleichzeitig verbunden sein. Nach Typ
+// geschluesselte Zustaende ueberschreiben sich dann gegenseitig - am Geraet
+// gesehen als Akkustand, der im Reporttakt zwischen zwei Werten sprang.
+ControllerSession *findSessionByTracker(const ReportTracker &tracker);
+
+// Platznummer einer Sitzung, als stabiler Schluessel je GERAET. 
+// MAXIMUM_CONTROLLER_SESSIONS = kein Platz gefunden.
+size_t sessionIndexOf(const ControllerSession *session);
 ControllerSession *findSessionByType(Switch2ControllerType type);
 
 // Belegt einen freien Platz und setzt ihn auf einen definierten Anfangszustand.

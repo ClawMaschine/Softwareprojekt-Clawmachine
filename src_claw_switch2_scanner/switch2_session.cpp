@@ -14,6 +14,35 @@ ControllerSession *findSessionByAddress(const NimBLEAddress &address)
   return nullptr;
 }
 
+ControllerSession *findSessionByTracker(const ReportTracker &tracker)
+{
+  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
+  {
+    if (&controllerSessions[i].specificReportTracker == &tracker ||
+        &controllerSessions[i].commonReportTracker == &tracker)
+    {
+      return &controllerSessions[i];
+    }
+  }
+  return nullptr;
+}
+
+size_t sessionIndexOf(const ControllerSession *session)
+{
+  for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
+  {
+    if (&controllerSessions[i] == session)
+    {
+      return i;
+    }
+  }
+  return MAXIMUM_CONTROLLER_SESSIONS;
+}
+
+// ACHTUNG: mit zwei gleichartigen Controllern (zwei linke Joy-Cons) ist der Typ
+// kein eindeutiger Schluessel - hier gewinnt der erste belegte Platz. Fuer die
+// Vibration ist das hinnehmbar, fuer Zustaende nicht: die laufen deshalb ueber
+// findSessionByTracker.
 ControllerSession *findSessionByType(Switch2ControllerType type)
 {
   for (size_t i = 0; i < MAXIMUM_CONTROLLER_SESSIONS; i++)
