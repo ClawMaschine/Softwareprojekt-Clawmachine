@@ -235,14 +235,22 @@ class ClawMachine:
         # Klauen-Geschwindigkeit und Beschleunigungen liegen als Settings auf dem
         # Motor-Controller und gehen verloren, wenn dieser neu startet — deshalb beim
         # Serverstart und bei jeder (Neu-)Registrierung erneut senden.
-        self.mqtt_client.publish(
-            MOTOR_CONTROLLER_SETTINGS_TOPIC,
+        payload = (
             json.dumps(
                 {
                     "clawSpeedDegreesPerSecond": self.claw_speed_degrees_per_second,
                     "clawJogSpeedDegreesPerSecond": self.move_controller.motor_speed_configuration.claw_jog_degrees_per_second,
                     "xyMaxRevolutionsPerMinute": self.move_controller.motor_speed_configuration.xy_max_revolutions_per_minute,
                     "zMaxRevolutionsPerMinute": self.move_controller.motor_speed_configuration.z_max_revolutions_per_minute,
+                    "xTravelSteps": self.move_controller.positioning_configuration.travel_steps_by_axis[
+                        "X"
+                    ],
+                    "yTravelSteps": self.move_controller.positioning_configuration.travel_steps_by_axis[
+                        "Y"
+                    ],
+                    "zTravelSteps": self.move_controller.positioning_configuration.travel_steps_by_axis[
+                        "Z"
+                    ],
                     "xyAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second(
                         "X"
                     ),
@@ -251,6 +259,10 @@ class ClawMachine:
                     ),
                 }
             ),
+        )
+        self.mqtt_client.publish(MOTOR_CONTROLLER_SETTINGS_TOPIC, payload)
+        print(
+            f"Published motor settings to {MOTOR_CONTROLLER_SETTINGS_TOPIC}: {payload}"
         )
 
     def publish_speed_settings(self):
