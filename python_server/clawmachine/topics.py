@@ -38,6 +38,7 @@ CONTROL_TOPIC = build_topic("claw")
 MOTOR_CONTROLLER_COMMAND_TOPIC = device_topic(
     "claw_motor_controller", "motor", "command"
 )
+MOTOR_CONTROLLER_ERROR_LOG_TOPIC = device_topic("claw_motor_controller", "error_log")
 # JSON-Settings-Update (z.B. Beschleunigung), getrennt von den Bewegungsbefehlen
 MOTOR_CONTROLLER_SETTINGS_TOPIC = device_topic("claw_motor_controller", "settings")
 # Motor-Controller -> Server: gezaehlte Schrittpositionen {"X":..,"Y":..,"Z":..}

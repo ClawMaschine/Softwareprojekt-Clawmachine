@@ -379,7 +379,10 @@ class ClawMachine:
                     return
                 self.move_controller.update_endstop_status(endstop_state)
                 self.mqtt_client.publish(WEB_INTERFACE_ENDSTOP_TOPIC, payload_text)
-
+            case _ if topic == MOTOR_CONTROLLLER_ERROR_TOPIC:
+                if payload_text == "need-homing":
+                    print("Motor controller requested homing sequence.")
+                    self.move_controller.start_homing_sequence()
             case _ if topic == MOTOR_CONTROLLER_POSITION_TOPIC:
                 # Vom Motor-Controller gezaehlte Schritte, z.B. {"X":1200,"Y":0,"Z":340}
                 try:
