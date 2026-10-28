@@ -223,7 +223,7 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
 
   if (strcmp(topic, MOTOR_SETTINGS_TOPIC) == 0) {
     // JSON-Settings-Update, z.B. {"accelerationPercentPerSecond": 50} (alle Achsen), {"xyAccelerationPercentPerSecond": 50},
-    // {"zAccelerationPercentPerSecond": 50} oder {"clawSpeedDegreesPerSecond": 35}
+    // {"zAccelerationPercentPerSecond": 50}, {"clawSpeedDegreesPerSecond": 35} oder {"clawJogSpeedDegreesPerSecond": 10}
     JsonDocument jsonDoc;
     DeserializationError error = deserializeJson(jsonDoc, message);
     if (error) {
@@ -242,6 +242,10 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
     }
     if (jsonDoc["zAccelerationPercentPerSecond"].is<float>()) {
       movementController.setZAcceleration(jsonDoc["zAccelerationPercentPerSecond"].as<float>());
+      hasKnownSetting = true;
+    }
+    if (jsonDoc["clawJogSpeedDegreesPerSecond"].is<float>()) {
+      movementController.setClawJogSpeed(jsonDoc["clawJogSpeedDegreesPerSecond"].as<float>());
       hasKnownSetting = true;
     }
     if (jsonDoc["clawSpeedDegreesPerSecond"].is<float>()) {

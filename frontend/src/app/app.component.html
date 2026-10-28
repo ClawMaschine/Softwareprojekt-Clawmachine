@@ -85,6 +85,11 @@
         <button
           class="btn btn-claw"
           [disabled]="connectionStatus !== 'connected'"
+          (click)="startHoming()"
+        >Homing starten</button>
+        <button
+          class="btn btn-claw"
+          [disabled]="connectionStatus !== 'connected'"
           (click)="sendClaw('open')"
         >Klaue öffnen</button>
         <button

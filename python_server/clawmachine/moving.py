@@ -55,7 +55,8 @@ class Moving:
             self.endstop_status[axis] = 0 if is_triggered else 1
             if is_triggered and self.homing_in_progress.get(axis):
                 self.__finish_homing(axis)
-            elif is_triggered and self.commanded_speed[axis] < 0:
+                continue
+            if is_triggered and self.commanded_speed[axis] < 0:
                 # Achse faehrt gerade auf ihren Endstop zu: sofort stoppen
                 print(f"[MOVING] Endstop {axis} ausgeloest — Achse gestoppt")
                 self.__stop_axis_immediately(axis)
@@ -82,6 +83,12 @@ class Moving:
             self.home_axis(HOMING_SEQUENCE[next_index])
 
     def start_homing_sequence(self):
+        # Auch als Neustart brauchbar (Webinterface-Taste): ein evtl.
+        # laufendes Homing wird verworfen und alle Achsen halten an.
+        for axis in HOMING_SEQUENCE:
+            self.homing_in_progress[axis] = False
+            if self.commanded_speed[axis] != 0:
+                self.__stop_axis_immediately(axis)
         self.home_axis(HOMING_SEQUENCE[0])
 
     def home_axis(self, axis):
@@ -91,6 +98,11 @@ class Moving:
 
         print(f"[MOVING] Starte Homing fuer Achse {axis}")
         self.homing_in_progress[axis] = True
+        if self.__endstop_reached(axis):
+            # Das Endstop-Board meldet nur Aenderungen: steht die Achse schon am
+            # Endstop, kommt keine Meldung mehr, die das Homing abschliessen wuerde.
+            self.__finish_homing(axis)
+            return True
         self.__send_axis_speed(axis, -HOMING_SPEED)
         return True
 

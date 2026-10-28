@@ -50,7 +50,12 @@ WEB_INTERFACE_ENDSTOP_TOPIC = web_interface_topic("endstop")
 WEB_INTERFACE_DEVICE_LIST_TOPIC = web_interface_topic("devices")
 WEB_INTERFACE_DEVICE_LIST_REQUEST_TOPIC = web_interface_topic("devices", "request")
 WEB_INTERFACE_INPUT_SOURCES_TOPIC = web_interface_topic("input_sources")
-WEB_INTERFACE_INPUT_SOURCES_REQUEST_TOPIC = web_interface_topic("input_sources", "request")
+WEB_INTERFACE_INPUT_SOURCES_REQUEST_TOPIC = web_interface_topic(
+    "input_sources", "request"
+)
 WEB_INTERFACE_INPUT_SOURCES_SET_TOPIC = web_interface_topic("input_sources", "set")
 WEB_INTERFACE_SPEED_SETTINGS_TOPIC = web_interface_topic("speed_settings")
-WEB_INTERFACE_SPEED_SETTINGS_REQUEST_TOPIC = web_interface_topic("speed_settings", "request")
+WEB_INTERFACE_SPEED_SETTINGS_REQUEST_TOPIC = web_interface_topic(
+    "speed_settings", "request"
+)
+WEB_INTERFACE_START_HOMING_TOPIC = web_interface_topic("start_homing")

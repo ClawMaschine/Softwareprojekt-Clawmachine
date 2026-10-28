@@ -32,6 +32,8 @@ public:
   void setZAcceleration(float percentPerSecond);
   // Fahrgeschwindigkeit der Klaue in Grad pro Sekunde (konstant, ohne Rampe)
   void setClawSpeed(float degreesPerSecond);
+  // Geschwindigkeit fuer das langsame Fahren bei gehaltener Taste (claw:jog_open/jog_close)
+  void setClawJogSpeed(float degreesPerSecond);
 
 private:
 

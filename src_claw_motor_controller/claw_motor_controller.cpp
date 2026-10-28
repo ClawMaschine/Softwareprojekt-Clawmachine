@@ -95,6 +95,11 @@ void ClawMotorController::setClawSpeed(float degreesPerSecond)
   clawServo.setSpeed(degreesPerSecond);
 }
 
+void ClawMotorController::setClawJogSpeed(float degreesPerSecond)
+{
+  clawServo.setJogSpeed(degreesPerSecond);
+}
+
 void ClawMotorController::setAcceleration(float percentPerSecond)
 {
   setXyAcceleration(percentPerSecond);
@@ -152,6 +157,12 @@ bool ClawMotorController::moveClaw(const char *command)
   } else if (strcmp(command, "close") == 0) {
     clawServo.close();
     Serial.println("[MOTOR] Klaue: close");
+  } else if (strcmp(command, "jog_open") == 0) {
+    clawServo.jog(-1);
+  } else if (strcmp(command, "jog_close") == 0) {
+    clawServo.jog(1);
+  } else if (strcmp(command, "stop") == 0) {
+    clawServo.stopMoving();
   } else {
     // Winkel in Grad als Zahl, z.B. "120"; ClawServoMotor begrenzt auf den erlaubten Bereich
     char *angleEnd = nullptr;

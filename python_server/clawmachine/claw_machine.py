@@ -87,6 +87,8 @@ WEB_INTERFACE_DEVICE_PREFIX = "claw_web_interface_"
 # Client-ID des Motor-Controller-ESP (CLAW_MOTOR_CONTROLLER_CLIENT_ID) — sobald
 # er sich (neu) meldet, bekommt er die Klauen-Geschwindigkeit nachgeschickt.
 MOTOR_CONTROLLER_DEVICE_NAME = "claw_motor_controller"
+# Client-ID des Endstop-Boards (CLAW_ENDSTOP_CLIENT_ID)
+ENDSTOP_DEVICE_NAME = "claw_endstop"
 
 
 @dataclass
@@ -110,6 +112,7 @@ class ClawMachine:
         self.claw_speed_degrees_per_second = (
             motor_speed_configuration.claw_degrees_per_second
         )
+        self.claw_jog_state = "stop"
         self.move_controller = Moving(self.mqtt_client, motor_speed_configuration)
         self.web_interface_presence = WebInterfacePresence()
         self.input_source_control = InputSourceControl(
@@ -128,6 +131,15 @@ class ClawMachine:
         # Subscriptions muessen vorher stehen, sonst koennten die
         # Endstop-Updates, die die Sequenz voranschalten, nie ankommen.
         self.publish_motor_settings()
+
+        # Homing erst starten, wenn Motor-Controller und Endstop-Board online sind:
+        # "X:-30" geht nicht retained raus und ginge sonst verloren, homing_in_progress
+        # bliebe aber gesetzt. Dann loest spaeter der erste Kontakt mit dem X-Endstop
+        # die ganze Sequenz aus.
+        while not self.are_homing_devices_online():
+            print("Waiting for motor controller and endstop board to come online...")
+            time.sleep(1)
+
         self.move_controller.start_homing_sequence()
 
         self.main_loop_started_at = time.time()
@@ -165,6 +177,27 @@ class ClawMachine:
                 self.publish_motor_settings()
         return device
 
+    def are_homing_devices_online(self) -> bool:
+        return all(
+            device is not None and device.is_online
+            for device in (
+                self.device_registry.get(MOTOR_CONTROLLER_DEVICE_NAME),
+                self.device_registry.get(ENDSTOP_DEVICE_NAME),
+            )
+        )
+
+    def update_claw_jog(self, is_open_pressed: bool, is_close_pressed: bool):
+        # Gehaltene Taste -> Klaue faehrt langsam auf/zu (claw:jog_open / claw:jog_close),
+        # Loslassen -> claw:stop haelt sie sofort an der aktuellen Position an.
+        if is_open_pressed == is_close_pressed:
+            jog_state = "stop"  # keine oder beide Tasten
+        else:
+            jog_state = "jog_open" if is_open_pressed else "jog_close"
+        if jog_state == self.claw_jog_state:
+            return
+        self.claw_jog_state = jog_state
+        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"claw:{jog_state}")
+
     def publish_motor_settings(self):
         # Klauen-Geschwindigkeit und Beschleunigungen liegen als Settings auf dem
         # Motor-Controller und gehen verloren, wenn dieser neu startet — deshalb beim
@@ -174,8 +207,13 @@ class ClawMachine:
             json.dumps(
                 {
                     "clawSpeedDegreesPerSecond": self.claw_speed_degrees_per_second,
-                    "xyAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second("X"),
-                    "zAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second("Z"),
+                    "clawJogSpeedDegreesPerSecond": self.move_controller.motor_speed_configuration.claw_jog_degrees_per_second,
+                    "xyAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second(
+                        "X"
+                    ),
+                    "zAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second(
+                        "Z"
+                    ),
                 }
             ),
         )
@@ -190,8 +228,12 @@ class ClawMachine:
                     "xyPercent": self.move_controller.max_speed_percent("X"),
                     "zPercent": self.move_controller.max_speed_percent("Z"),
                     "clawDegreesPerSecond": self.claw_speed_degrees_per_second,
-                    "xyAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second("X"),
-                    "zAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second("Z"),
+                    "xyAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second(
+                        "X"
+                    ),
+                    "zAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second(
+                        "Z"
+                    ),
                 }
             ),
         )
@@ -274,7 +316,7 @@ class ClawMachine:
                     return
                 self.publish_input_sources()
             # 7) Steuerbefehl für die Motoren (z.B. "X:100", "claw:open") auf dem
-            #    Haupt-Steuertopic — unverändert an den Motor-Controller weiterleiten
+            #    Haupt-Steuertopic — unverändert an den Motor-Controller über move_controller weiterleiten
             case _ if topic == self.control_topic and payload_text.startswith(
                 MOTOR_COMMAND_PREFIXES
             ):
@@ -361,6 +403,11 @@ class ClawMachine:
                 self.move_controller.move_axis(
                     "Z", state.get("up", 0) - state.get("down", 0)
                 )
+
+                # Klaue langsam auf/zu, solange die Taste gehalten wird (nur Joy-Con)
+                self.update_claw_jog(
+                    state.get("clawOpen", 0) > 0, state.get("clawClose", 0) > 0
+                )
             # 6) Steuerbefehl vom Webinterface (z.B. "left:80", "front:-80",
             #    "claw:open") — das Webinterface rechnet die Geschwindigkeit
             #    schon selbst aus (siehe app.component.ts), der Server muss
@@ -408,6 +455,9 @@ class ClawMachine:
                         self.move_controller.set_acceleration("Z", acceleration)
                     self.publish_motor_settings()
                     self.publish_speed_settings()
+                elif name == "home":
+                    # Referenzfahrt aller Achsen (X, Y, Z nacheinander) neu starten
+                    self.move_controller.start_homing_sequence()
                 elif name == "claw_speed":
                     # Fahrgeschwindigkeit der Klaue in Grad/s, ebenfalls ein
                     # Settings-JSON (siehe "accel" oben). Wird gemerkt, damit sie

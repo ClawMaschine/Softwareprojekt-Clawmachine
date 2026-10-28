@@ -68,7 +68,8 @@ void ClawServoMotor::update()
     return;
   }
   const float remainingDegrees = targetAngleDegrees - currentAngleDegrees;
-  const float maxStepDegrees = speedDegreesPerSecond * elapsedSeconds;
+  const float activeSpeedDegreesPerSecond = isJogging ? jogSpeedDegreesPerSecond : speedDegreesPerSecond;
+  const float maxStepDegrees = activeSpeedDegreesPerSecond * elapsedSeconds;
   if (fabsf(remainingDegrees) <= maxStepDegrees) {
     currentAngleDegrees = targetAngleDegrees;
   } else {
@@ -84,8 +85,32 @@ void ClawServoMotor::setAngle(uint8_t angleDegrees)
     Serial.println("[SERVO] FEHLER: Servo nicht angehaengt, Befehl ignoriert");
     return;
   }
+  isJogging = false;
   targetAngleDegrees = angleDegrees;
   Serial.printf("[SERVO] Zielwinkel: %u Grad\n", angleDegrees);
+}
+
+void ClawServoMotor::setJogSpeed(float degreesPerSecond)
+{
+  jogSpeedDegreesPerSecond = max(degreesPerSecond, MIN_SPEED_DEGREES_PER_SECOND);
+  Serial.printf("[SERVO] Jog-Geschwindigkeit: %.1f Grad/s\n", jogSpeedDegreesPerSecond);
+}
+
+void ClawServoMotor::jog(int direction)
+{
+  if (!servo.attached()) {
+    return;
+  }
+  isJogging = true;
+  targetAngleDegrees = direction < 0 ? openAngleDegrees : closedAngleDegrees;
+  Serial.printf("[SERVO] Jog Richtung %s\n", direction < 0 ? "auf" : "zu");
+}
+
+void ClawServoMotor::stopMoving()
+{
+  isJogging = false;
+  targetAngleDegrees = currentAngleDegrees;
+  Serial.printf("[SERVO] Gestoppt bei %.1f Grad\n", currentAngleDegrees);
 }
 
 void ClawServoMotor::open()

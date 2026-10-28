@@ -17,6 +17,12 @@ public:
   void setAngle(uint8_t angleDegrees);
   // Konstante Fahrgeschwindigkeit in Grad pro Sekunde (keine Beschleunigungsrampe).
   void setSpeed(float degreesPerSecond);
+  // Langsames Fahren, solange eine Taste gehalten wird: jog() faehrt mit der Jog-
+  // Geschwindigkeit auf die offene (-1) bzw. geschlossene (+1) Endposition,
+  // stopMoving() haelt die Klaue sofort an der aktuellen Position an.
+  void jog(int direction);
+  void stopMoving();
+  void setJogSpeed(float degreesPerSecond);
   void update();
 
   // Fahrbereich, den die Klaue mechanisch nutzen darf (am Aufbau ermittelt mit
@@ -32,6 +38,7 @@ private:
   static const int SERVO_MAX_PULSE_MICROSECONDS = 2300;
 
   static constexpr float DEFAULT_SPEED_DEGREES_PER_SECOND = 35.0f;
+  static constexpr float DEFAULT_JOG_SPEED_DEGREES_PER_SECOND = 10.0f;
   static constexpr float MIN_SPEED_DEGREES_PER_SECOND = 1.0f;
 
   void writeAngle(float angleDegrees);
@@ -39,6 +46,8 @@ private:
   float currentAngleDegrees;
   float targetAngleDegrees;
   float speedDegreesPerSecond = DEFAULT_SPEED_DEGREES_PER_SECOND;
+  float jogSpeedDegreesPerSecond = DEFAULT_JOG_SPEED_DEGREES_PER_SECOND;
+  bool  isJogging = false;
   unsigned long lastUpdateMicroseconds = 0;
 
   Servo servo;

@@ -46,7 +46,7 @@
 // Zusaetzlich sendet diese Firmware die Steuerbefehle des LINKEN Joy-Con per
 // MQTT an den Python-Server - im selben Format, das der Server vom Control-
 // Panel kennt, sodass dort keine neue Auswertelogik noetig ist. Das ist
-// bewusst dieselbe Rolle, die src_claw_panel_test beim Panel hatte: eine
+// bewusst dieselbe Rolle, die src_claw_panel_input beim Panel hatte: eine
 // Testfirmware, die auf das echte Topic sendet. Der Umbau nach
 // src_claw_player_input kommt spaeter.
 //
@@ -229,6 +229,10 @@ static constexpr uint8_t JOYCON_MASK_DIRECTION_LEFT  = 0x04;
 static constexpr uint8_t JOYCON_MASK_DIRECTION_UP    = 0x08;
 static constexpr uint8_t JOYCON_MASK_SHOULDER_UPPER  = 0x10;  // L bzw. R
 static constexpr uint8_t JOYCON_MASK_SHOULDER_LOWER  = 0x20;  // ZL bzw. ZR
+// Klaue langsam auf/zu: Minus am linken Joy-Con = auf, Plus am rechten = zu. Beide haben
+// dieselbe Maske. ACHTUNG: noch nicht am Geraet gemessen (Doku: 0x40 = Minus/Plus). Mit
+// 'b' (rohe Bitmasken) pruefen und bei Bedarf hier aendern.
+static constexpr uint8_t JOYCON_MASK_MINUS_OR_PLUS   = 0x40;
 
 // Die A-Taste des rechten Joy-Con loest die Testvibration aus. Byte und Maske
 // sind deckungsgleich mit dem Eintrag in JOYCON_RIGHT_BUTTON_MAPPINGS und dort
@@ -272,6 +276,9 @@ struct JoyConControlState
   uint8_t rightPercent = 0;
   uint8_t frontPercent = 0;
   uint8_t backPercent  = 0;
+  // Klaue langsam auf/zu, solange die Taste gehalten wird (0 oder 100)
+  uint8_t clawOpenPercent  = 0;
+  uint8_t clawClosePercent = 0;
 
   // Gegensaetzliche Richtungen derselben Achse gleichzeitig ergeben keinen
   // sinnvollen Motorbefehl. Spiegelt PanelInput::isValid().
@@ -280,6 +287,7 @@ struct JoyConControlState
     if (leftPercent > 0 && rightPercent > 0) return false;
     if (frontPercent > 0 && backPercent > 0) return false;
     if (upPercent > 0 && downPercent > 0)    return false;
+    if (clawOpenPercent > 0 && clawClosePercent > 0) return false;
     return true;
   }
 
@@ -291,7 +299,9 @@ struct JoyConControlState
            (leftPercent == 0) != (other.leftPercent == 0) ||
            (rightPercent == 0) != (other.rightPercent == 0) ||
            (frontPercent == 0) != (other.frontPercent == 0) ||
-           (backPercent == 0) != (other.backPercent == 0);
+           (backPercent == 0) != (other.backPercent == 0) ||
+           (clawOpenPercent == 0) != (other.clawOpenPercent == 0) ||
+           (clawClosePercent == 0) != (other.clawClosePercent == 0);
   }
 
   // Groesste Aenderung einer einzelnen Richtung gegenueber other (in Prozentpunkten).
@@ -303,7 +313,9 @@ struct JoyConControlState
         static_cast<uint8_t>(abs(static_cast<int>(leftPercent) - other.leftPercent)),
         static_cast<uint8_t>(abs(static_cast<int>(rightPercent) - other.rightPercent)),
         static_cast<uint8_t>(abs(static_cast<int>(frontPercent) - other.frontPercent)),
-        static_cast<uint8_t>(abs(static_cast<int>(backPercent) - other.backPercent))};
+        static_cast<uint8_t>(abs(static_cast<int>(backPercent) - other.backPercent)),
+        static_cast<uint8_t>(abs(static_cast<int>(clawOpenPercent) - other.clawOpenPercent)),
+        static_cast<uint8_t>(abs(static_cast<int>(clawClosePercent) - other.clawClosePercent))};
     uint8_t largestChange = 0;
     for (uint8_t change : changes)
     {
@@ -316,7 +328,8 @@ struct JoyConControlState
   {
     return upPercent == other.upPercent && downPercent == other.downPercent &&
            leftPercent == other.leftPercent && rightPercent == other.rightPercent &&
-           frontPercent == other.frontPercent && backPercent == other.backPercent;
+           frontPercent == other.frontPercent && backPercent == other.backPercent &&
+           clawOpenPercent == other.clawOpenPercent && clawClosePercent == other.clawClosePercent;
   }
 };
 
@@ -1220,8 +1233,24 @@ static JoyConControlState readControlStateFromReport(const ReportTracker &tracke
   state.rightPercent = (buttons & JOYCON_MASK_DIRECTION_RIGHT) != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
   state.frontPercent = (buttons & JOYCON_MASK_DIRECTION_DOWN)  != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
   state.backPercent  = (buttons & JOYCON_MASK_DIRECTION_UP)    != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
-  state.upPercent    = (buttons & JOYCON_MASK_SHOULDER_UPPER)  != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
-  state.downPercent  = (buttons & JOYCON_MASK_SHOULDER_LOWER)  != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
+  if ((buttons & JOYCON_MASK_MINUS_OR_PLUS) != 0)
+  {
+    if (tracker.controllerType == Switch2ControllerType::JoyConLeft)
+    {
+      state.clawOpenPercent = JOYCON_BUTTON_PRESSED_PERCENT;   // Minus
+    }
+    else if (tracker.controllerType == Switch2ControllerType::JoyConRight)
+    {
+      state.clawClosePercent = JOYCON_BUTTON_PRESSED_PERCENT;  // Plus
+    }
+  }
+
+  // Z ist gegenueber den Namen vertauscht: Der Server rechnet z = up - down, und ein
+  // positiver Z-Wert senkt die Klaue ab (Endstop z1 sitzt oben). Das Panel ist genauso
+  // ueber getauschte Pins (CLAW_PANEL_PIN_UP/DOWN) angepasst. Deshalb hebt die obere
+  // Schultertaste die Klaue ("down" = negativer Z-Wert) und die untere senkt sie ("up").
+  state.downPercent  = (buttons & JOYCON_MASK_SHOULDER_UPPER)  != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
+  state.upPercent    = (buttons & JOYCON_MASK_SHOULDER_LOWER)  != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
 
   const bool canReadStick = tracker.hasStickCenter &&
                             tracker.firstStickOffset != NO_STICK_OFFSET &&
@@ -1434,6 +1463,15 @@ static void publishPendingControlState()
   state.rightPercent = max(leftControlState.rightPercent, rightControlState.rightPercent);
   state.frontPercent = max(leftControlState.frontPercent, rightControlState.frontPercent);
   state.backPercent  = max(leftControlState.backPercent,  rightControlState.backPercent);
+  state.clawOpenPercent  = max(leftControlState.clawOpenPercent,  rightControlState.clawOpenPercent);
+  state.clawClosePercent = max(leftControlState.clawClosePercent, rightControlState.clawClosePercent);
+
+  // Beide Klauen-Tasten gleichzeitig: Klaue nicht bewegen statt den ganzen Zustand zu verwerfen
+  if (state.clawOpenPercent > 0 && state.clawClosePercent > 0)
+  {
+    state.clawOpenPercent  = 0;
+    state.clawClosePercent = 0;
+  }
 
   if (!state.isValid())
   {
@@ -1476,12 +1514,14 @@ static void publishPendingControlState()
   }
   lastPublishedAtMilliseconds = nowMilliseconds;
 
-  char payload[160];
+  char payload[200];
   snprintf(payload, sizeof(payload),
-           "{\"up\":%d,\"down\":%d,\"left\":%d,\"right\":%d,\"front\":%d,\"back\":%d}",
+           "{\"up\":%d,\"down\":%d,\"left\":%d,\"right\":%d,\"front\":%d,\"back\":%d,"
+           "\"clawOpen\":%d,\"clawClose\":%d}",
            state.upPercent, state.downPercent,
            state.leftPercent, state.rightPercent,
-           state.frontPercent, state.backPercent);
+           state.frontPercent, state.backPercent,
+           state.clawOpenPercent, state.clawClosePercent);
 
   mqttConnection.publish(JOYCON_CONTROL_TOPIC, payload);
   Serial.printf("[MQTT]  %s -> %s\n", JOYCON_CONTROL_TOPIC, payload);

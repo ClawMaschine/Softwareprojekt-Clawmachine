@@ -145,6 +145,10 @@ export class AppComponent implements OnInit, OnDestroy {
     this.mqttService.publishCommand('front:0');
   }
 
+  startHoming(): void {
+    this.mqttService.publishCommand('home');
+  }
+
   sendClaw(action: 'open' | 'close'): void {
     this.mqttService.publishCommand(`claw:${action}`);
   }
