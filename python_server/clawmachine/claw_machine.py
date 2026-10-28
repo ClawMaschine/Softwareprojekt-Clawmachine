@@ -187,6 +187,7 @@ class ClawMachine:
         self.mqtt_client.subscribe(WEB_INTERFACE_SPEED_SETTINGS_REQUEST_TOPIC)
         self.mqtt_client.subscribe(ENDSTOP_TOPIC)
         self.mqtt_client.subscribe(MOTOR_CONTROLLER_POSITION_TOPIC)
+        self.mqtt_client.subscribe(MOTOR_CONTROLLER_ERROR_LOG_TOPIC)
         self.mqtt_client.subscribe(WEB_INTERFACE_POSITION_REQUEST_TOPIC)
         mqtt_network_client.on_message = self.on_message
 
