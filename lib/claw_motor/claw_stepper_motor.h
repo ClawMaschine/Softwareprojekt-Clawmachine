@@ -20,6 +20,17 @@ public:
   // bedeutet: von 0% auf 100% in 0.5s). 0 (Standard) = keine Rampe, die
   // Geschwindigkeit springt wie bisher sofort auf den Zielwert.
   void setAcceleration(float percentPerSecond);
+  // Drehzahl, die 100 % Geschwindigkeit entspricht. Wirkt sofort auch auf eine laufende Fahrt.
+  void setMaxRevolutionsPerMinute(uint16_t newMaxRevolutionsPerMinute);
+  // Zaehlt jeden ausgefuehrten Schritt mit Vorzeichen (vorwaerts = +1, rueckwaerts = -1).
+  // Es gibt keine Rueckmeldung vom Motor: verlorene Schritte fallen nicht auf, die Position
+  // stimmt nur bis zum naechsten Referenzieren (resetStepPosition am Endstop).
+  long getStepPosition() const;
+  void resetStepPosition(long newStepPosition);
+  // Faehrt mit der angegebenen Geschwindigkeit (Betrag in %, Richtung ergibt sich aus
+  // Ziel - aktuelle Position) bis zur Zielposition und haelt dort sofort an. Jeder
+  // setSpeed()/stopImmediately()-Aufruf bricht die Zielfahrt ab.
+  void moveToStepPosition(long targetStepPositionValue, int speedPercent);
   void update();
 
 private:
@@ -31,6 +42,10 @@ private:
   Adafruit_StepperMotor *stepperMotor;
 
   int targetSpeedPercent = 0;
+
+  long stepPosition = 0;
+  bool hasTargetStepPosition = false;
+  long targetStepPosition = 0;
 
   // Float statt int: update()/updateRamp() kann sehr oft pro Sekunde
   // aufgerufen werden (loop() hat kein delay() mehr, siehe main.cpp), da

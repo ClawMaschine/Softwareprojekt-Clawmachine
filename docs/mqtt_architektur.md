@@ -125,8 +125,8 @@ am I2C-Bus antworten, sonst Rollback (`rolled_back`).
 
 | Topic | Von → An | Payload |
 |---|---|---|
-| `clawmachine/player_input/panel` | Panel-ESP → Server | JSON `{"up":0,"down":0,"left":0,"right":0,"front":0,"back":0,"claw":0}` (0/1), nur bei Änderung |
-| `clawmachine/player_input/joycon` | Joy-Con-ESP → Server | JSON `{"up":0,"down":0,"left":0,"right":0,"front":0,"back":0}`, Werte 0–100 (Prozent: Tasten 100, zusätzlich `clawOpen`/`clawClose` (0/100) für die Klauen-Tasten Minus (links, auf) und Plus (rechts, zu), Stick = Auslenkung hinter der Totzone mit Hysterese; Änderungen unter 3 Prozentpunkten werden nicht gesendet), nur bei Änderung. Gleiche Feldnamen wie Panel (dort 0/1) ohne `claw` |
+| `clawmachine/player_input/panel` | Panel-ESP → Server | JSON `{"up":0,"down":0,"left":0,"right":0,"front":0,"back":0,"claw":0}` (Tasten 0/1, `claw` = Klauen-Poti in Prozent 0–100; der Server bildet es auf den Klauenwinkel 90–160° ab und sendet `claw:<winkel>`), nur bei Änderung |
+| `clawmachine/player_input/joycon` | Joy-Con-ESP → Server | JSON `{"up":0,"down":0,"left":0,"right":0,"front":0,"back":0}`, Werte 0–100 (Prozent: Tasten 100, zusätzlich `clawOpen`/`clawClose` (0/100) für die Schultertasten (L/ZL links = auf, R/ZR rechts = zu). Linker Joy-Con: Stick und Steuerkreuz = X/Y. Rechter Joy-Con: Stick senkrecht = Z. Stick = Auslenkung hinter der Totzone mit Hysterese; Änderungen unter 3 Prozentpunkten werden nicht gesendet), nur bei Änderung. Gleiche Feldnamen wie Panel (dort 0/1) ohne `claw` |
 | `clawmachine/endstop/state` | Endstop-ESP → Server, Joy-Con-ESP | JSON `{"x1":0,"x2":0,"y1":0,"y2":0,"z1":0}`, `1` = ausgelöst, nur bei Änderung |
 | `clawmachine/web_interface/command` | Webinterface → Server | Text `<name>:<wert>`, siehe 4 |
 | `clawmachine/claw` | beliebig → Server | Text `X:<v>` / `Y:<v>` / `Z:<v>` / `claw:<aktion>`, Haupt-Steuertopic (wird vom Emulator `steering.py` genutzt) |
@@ -135,8 +135,9 @@ am I2C-Bus antworten, sonst Rollback (`rolled_back`).
 
 | Topic | Von → An | Payload |
 |---|---|---|
-| `clawmachine/motor_controller/motor/command` | Server → Motor-Controller | Text `X:<v>`, `Y:<v>`, `Z:<v>` (Geschwindigkeit, ganzzahlig, negativ = Gegenrichtung, `0` = Stopp) oder `stop:<Achse>` (z. B. `stop:X`, sofortiger Stopp ohne Rampe) oder `claw:<aktion>` (`claw:open`, `claw:close`, `claw:jog_open` / `claw:jog_close` (fährt langsam, bis `claw:stop` kommt; der Server sendet das, solange die Klauen-Taste am Joy-Con gehalten wird) oder ein Winkel in Grad, z. B. `claw:120`; die Klaue begrenzt auf 90–160°). Der Motor-Controller akzeptiert zusätzlich JSON, z. B. `{"X":100,"Y":0,"Z":0,"claw":"open"}` (`"claw"` auch als Zahl, Winkel in Grad); nur enthaltene Felder werden angewendet. Der Server sendet bisher das Textformat |
-| `clawmachine/motor_controller/settings` | Server → Motor-Controller | JSON mit einem oder mehreren Feldern: `{"accelerationPercentPerSecond": 50.0}` (alle Fahrmotoren), `{"xyAccelerationPercentPerSecond": 50.0}` / `{"zAccelerationPercentPerSecond": 50.0}` (getrennt für X/Y und Z) bzw. `{"clawSpeedDegreesPerSecond": 35.0}` (Klaue, konstante Geschwindigkeit ohne Rampe, Minimum 1) |
+| `clawmachine/motor_controller/motor/command` | Server → Motor-Controller | Text `X:<v>`, `Y:<v>`, `Z:<v>` (Geschwindigkeit, ganzzahlig, negativ = Gegenrichtung, `0` = Stopp) oder `stop:<Achse>` (z. B. `stop:X`, sofortiger Stopp ohne Rampe) oder `zero:<Achse>` (aktuelle Stellung = Position 0, der Server sendet es beim Erreichen des Endstops, auch im Homing) oder `goto:<Achse>:<Schritte>:<Prozent>` (fährt mit Betrag `Prozent` zur Position und hält dort sofort an; jedes `X:`/`stop:` dieser Achse bricht die Zielfahrt ab) oder `claw:<aktion>` (`claw:open`, `claw:close`, `claw:jog_open` / `claw:jog_close` (fährt langsam, bis `claw:stop` kommt; der Server sendet das, solange die Klauen-Taste am Joy-Con gehalten wird) oder ein Winkel in Grad, z. B. `claw:120`; die Klaue begrenzt auf 90–160°). Der Motor-Controller akzeptiert zusätzlich JSON, z. B. `{"X":100,"Y":0,"Z":0,"claw":"open"}` (`"claw"` auch als Zahl, Winkel in Grad); nur enthaltene Felder werden angewendet. Der Server sendet bisher das Textformat |
+| `clawmachine/motor_controller/position` | Motor-Controller → Server | JSON `{"X":1200,"Y":0,"Z":340}`: vom Motor-Controller mitgezählte Schritte je Achse im Server-Koordinatensystem (0 = Endstop, positiv = vom Endstop weg). Bei Änderung höchstens alle 200 ms, sonst alle 5 s |
+| `clawmachine/motor_controller/settings` | Server → Motor-Controller | JSON mit einem oder mehreren Feldern: `{"accelerationPercentPerSecond": 50.0}` (alle Fahrmotoren), `{"xyAccelerationPercentPerSecond": 50.0}` / `{"zAccelerationPercentPerSecond": 50.0}` (getrennt für X/Y und Z) bzw. `{"xyMaxRevolutionsPerMinute": 120}` / `{"zMaxRevolutionsPerMinute": 120}` (Drehzahl, die 100 % entspricht, aus `config.ini`; der Server sendet sie beim Start und bei jeder Neuregistrierung) bzw. `{"clawSpeedDegreesPerSecond": 35.0}` (Klaue, konstante Geschwindigkeit ohne Rampe, Minimum 1) |
 
 ### 3.4 Server ↔ Webinterface
 
@@ -149,6 +150,8 @@ am I2C-Bus antworten, sonst Rollback (`rolled_back`).
 | `clawmachine/web_interface/input_sources/set` | Webinterface → Server | Text `<quelle>:on` oder `<quelle>:off`, Quelle = `panel` oder `joycon` |
 | `clawmachine/web_interface/speed_settings/request` | Webinterface → Server | leer (Anfrage) |
 | `clawmachine/web_interface/speed_settings` | Server → Webinterface | JSON `{"xyPercent":100,"zPercent":100,"clawDegreesPerSecond":35.0,"xyAccelerationPercentPerSecond":50,"zAccelerationPercentPerSecond":50}`, auch ungefragt nach jeder Änderung |
+| `clawmachine/web_interface/position/request` | Webinterface → Server | leer (Anfrage) |
+| `clawmachine/web_interface/position` | Server → Webinterface | JSON `{"position":{"X":0,..},"isReferenced":{"X":true,..},"gotoTargets":{"X":null,..},"travelSteps":{"X":0,..}}`, bei jeder Positionsmeldung des Motor-Controllers und auf Anfrage |
 | `clawmachine/web_interface/endstop` | Server → Webinterface | durchgereichter Endstop-JSON (wie `endstop/state`) |
 
 Das Webinterface abonniert `clawmachine/#` und füllt damit Live-Status und Geräte-Log. Die Geräteliste fragt es zusätzlich zyklisch an.
@@ -162,8 +165,25 @@ Das Webinterface abonniert `clawmachine/#` und füllt damit Live-Status und Ger�
 | `claw:<aktion>` | unverändert weitergereicht |
 | `accel:<prozent_pro_s>` / `xy_accel:…` / `z_accel:…` | Beschleunigung in %/s: `accel` für X/Y und Z gemeinsam, die anderen getrennt. Der Server hält die Werte und sendet sie als JSON (`xyAccelerationPercentPerSecond`, `zAccelerationPercentPerSecond`) an `motor_controller/settings`, auch nach einem Neustart des Motor-Controllers |
 | `home` | startet die Homing-Sequenz (X, Y, Z nacheinander) neu; ein laufendes Homing wird verworfen und alle Achsen halten an |
+| `goto:<x>,<y>,<z>` | Zielfahrt in Schritten, leere Felder lassen die Achse stehen (z. B. `goto:1200,,300`). Nur nach dem Homing (`isReferenced`), nicht während des Homings und nur innerhalb 0..`*_travel_steps` aus `config.ini`; sonst wird alles abgelehnt. Geschwindigkeit: `goto_percent` |
+| `goto_cancel` | bricht laufende Zielfahrten ab (Sofortstopp der betroffenen Achsen) |
 | `claw_speed:<grad_pro_s>` | → `motor_controller/settings` als JSON (`clawSpeedDegreesPerSecond`) |
 | `xy_speed:<prozent>` / `z_speed:<prozent>` | setzt die Standard-Geschwindigkeit der Achsen am Server (Prozent der max. Drehzahl, gilt bis zum Serverneustart); antwortet auf `web_interface/speed_settings` |
+
+### 4.1 Position und Zielfahrten
+
+Der Motor-Controller zählt jeden ausgeführten Schritt (`ClawStepperMotor::getStepPosition`) und meldet die
+Position auf `motor_controller/position`. Es gibt keine Rückmeldung vom Motor, verlorene Schritte fallen also
+nicht auf. Deshalb:
+
+- Position 0 = Endstop. Beim Erreichen des Endstops (Homing oder Fahrt Richtung Endstop) sendet der Server
+  `zero:<Achse>`, das gleicht aufgelaufene Fehler aus.
+- Eine Position gilt nur, solange die Achse referenziert ist. Startet der Motor-Controller neu (Status
+  `online`/`offline`), zählt er wieder ab 0, der Server setzt `isReferenced` zurück und lehnt Zielfahrten ab, bis erneut gehomt wurde.
+- Eine Zielfahrt (`goto`) läuft komplett im Motor-Controller, die Regelung braucht also keine MQTT-Latenz. Sie endet
+  am Ziel, per `goto_cancel` oder durch eine echte Eingabe (Panel, Joy-Con, Webinterface) auf derselben Achse. Idle-Werte (0) anderer Eingaben brechen sie nicht ab.
+- Einen oberen Endstop gibt es nicht: den Verfahrweg je Achse trägt man in `config.ini` unter `[positioning]` ein
+  (`x_travel_steps` usw., 0 = unbegrenzt).
 
 ## 5. Payload-Konventionen
 

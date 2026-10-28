@@ -229,10 +229,6 @@ static constexpr uint8_t JOYCON_MASK_DIRECTION_LEFT  = 0x04;
 static constexpr uint8_t JOYCON_MASK_DIRECTION_UP    = 0x08;
 static constexpr uint8_t JOYCON_MASK_SHOULDER_UPPER  = 0x10;  // L bzw. R
 static constexpr uint8_t JOYCON_MASK_SHOULDER_LOWER  = 0x20;  // ZL bzw. ZR
-// Klaue langsam auf/zu: Minus am linken Joy-Con = auf, Plus am rechten = zu. Beide haben
-// dieselbe Maske. ACHTUNG: noch nicht am Geraet gemessen (Doku: 0x40 = Minus/Plus). Mit
-// 'b' (rohe Bitmasken) pruefen und bei Bedarf hier aendern.
-static constexpr uint8_t JOYCON_MASK_MINUS_OR_PLUS   = 0x40;
 
 // Die A-Taste des rechten Joy-Con loest die Testvibration aus. Byte und Maske
 // sind deckungsgleich mit dem Eintrag in JOYCON_RIGHT_BUTTON_MAPPINGS und dort
@@ -1209,14 +1205,25 @@ static void printStickDeflection(ReportTracker &tracker, const uint8_t *report, 
   tracker.hasPrintedDeflection  = true;
 }
 
-// Tasten und Stick eines Joy-Con in Steuerbefehle uebersetzen. Der Stick wirkt
-// wie ein zusaetzliches Steuerkreuz: ab der Schwelle gilt seine Richtung als
+// Tasten und Stick eines Joy-Con in Steuerbefehle uebersetzen. Die beiden Joy-Cons
+// haben getrennte Aufgaben:
+//
+//   linker Joy-Con   Stick und Steuerkreuz: X und Y (links/rechts, vorne/hinten)
+//                    L und ZL: Klaue auf
+//   rechter Joy-Con  Stick senkrecht: Z (hoch/runter)
+//                    R und ZR: Klaue zu
+//
+// Der Stick wirkt wie ein Steuerkreuz: ab der Schwelle gilt seine Richtung als
 // gedrueckt, damit er ohne Aenderung in das an/aus-Format des Panels passt.
 //
-// Waagerecht stimmen Tastenname und Bewegung ueberein: links am Controller
-// bewegt den Greifer nach links. Die senkrechte Achse ist dagegen bewusst
-// gespiegelt, Richtung oben bewegt den Greifer nach hinten. Stick und Tasten
-// folgen derselben Konvention, damit sich beides gleich anfuehlt.
+// X und Y sind bewusst gespiegelt: Richtung rechts am Controller liefert "left",
+// Richtung links liefert "right", und oben bewegt den Greifer nach hinten. Stick
+// und Tasten folgen derselben Konvention, damit sich beides gleich anfuehlt.
+//
+// Z ist gegenueber den Namen vertauscht: Der Server rechnet z = up - down, und ein
+// positiver Z-Wert senkt die Klaue ab (Endstop z1 sitzt oben). Das Panel ist genauso
+// ueber getauschte Pins (CLAW_PANEL_PIN_UP/DOWN) angepasst. Deshalb hebt der Stick
+// nach oben die Klaue ("down" = negativer Z-Wert) und nach unten senkt er sie ("up").
 static JoyConControlState readControlStateFromReport(const ReportTracker &tracker,
                                                      const uint8_t       *report,
                                                      size_t               length)
@@ -1227,30 +1234,33 @@ static JoyConControlState readControlStateFromReport(const ReportTracker &tracke
     return state;
   }
 
+  const bool isLeftJoyCon  = tracker.controllerType == Switch2ControllerType::JoyConLeft;
+  const bool isRightJoyCon = tracker.controllerType == Switch2ControllerType::JoyConRight;
+
   const uint8_t buttons = report[JOYCON_BUTTON_BYTE];
 
-  state.leftPercent  = (buttons & JOYCON_MASK_DIRECTION_LEFT)  != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
-  state.rightPercent = (buttons & JOYCON_MASK_DIRECTION_RIGHT) != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
-  state.frontPercent = (buttons & JOYCON_MASK_DIRECTION_DOWN)  != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
-  state.backPercent  = (buttons & JOYCON_MASK_DIRECTION_UP)    != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
-  if ((buttons & JOYCON_MASK_MINUS_OR_PLUS) != 0)
+  // Schultertasten beider Reihen: links oeffnen, rechts schliessen die Klaue.
+  const bool isShoulderPressed =
+      (buttons & (JOYCON_MASK_SHOULDER_UPPER | JOYCON_MASK_SHOULDER_LOWER)) != 0;
+  if (isShoulderPressed)
   {
-    if (tracker.controllerType == Switch2ControllerType::JoyConLeft)
+    if (isLeftJoyCon)
     {
-      state.clawOpenPercent = JOYCON_BUTTON_PRESSED_PERCENT;   // Minus
+      state.clawOpenPercent = JOYCON_BUTTON_PRESSED_PERCENT;
     }
-    else if (tracker.controllerType == Switch2ControllerType::JoyConRight)
+    else if (isRightJoyCon)
     {
-      state.clawClosePercent = JOYCON_BUTTON_PRESSED_PERCENT;  // Plus
+      state.clawClosePercent = JOYCON_BUTTON_PRESSED_PERCENT;
     }
   }
 
-  // Z ist gegenueber den Namen vertauscht: Der Server rechnet z = up - down, und ein
-  // positiver Z-Wert senkt die Klaue ab (Endstop z1 sitzt oben). Das Panel ist genauso
-  // ueber getauschte Pins (CLAW_PANEL_PIN_UP/DOWN) angepasst. Deshalb hebt die obere
-  // Schultertaste die Klaue ("down" = negativer Z-Wert) und die untere senkt sie ("up").
-  state.downPercent  = (buttons & JOYCON_MASK_SHOULDER_UPPER)  != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
-  state.upPercent    = (buttons & JOYCON_MASK_SHOULDER_LOWER)  != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
+  if (isLeftJoyCon)
+  {
+    state.leftPercent  = (buttons & JOYCON_MASK_DIRECTION_RIGHT) != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
+    state.rightPercent = (buttons & JOYCON_MASK_DIRECTION_LEFT)  != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
+    state.frontPercent = (buttons & JOYCON_MASK_DIRECTION_DOWN)  != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
+    state.backPercent  = (buttons & JOYCON_MASK_DIRECTION_UP)    != 0 ? JOYCON_BUTTON_PRESSED_PERCENT : 0;
+  }
 
   const bool canReadStick = tracker.hasStickCenter &&
                             tracker.firstStickOffset != NO_STICK_OFFSET &&
@@ -1264,15 +1274,23 @@ static JoyConControlState readControlStateFromReport(const ReportTracker &tracke
   const int8_t horizontalPercent = convertAxisToPercent(raw.x, tracker.stickCenter.x);
   const int8_t verticalPercent   = convertAxisToPercent(raw.y, tracker.stickCenter.y);
 
-  // Stick und Tasten wirken zusammen: gilt der hoehere Wert (Stick nach rechts: rechts;
-  // nach links: links; nach oben: hinten; nach unten: vorne).
-  const JoyConControlState &previousState = tracker.controllerType == Switch2ControllerType::JoyConLeft
-                                                ? leftControlState
-                                                : rightControlState;
-  state.rightPercent = max(state.rightPercent, convertStickDeflectionToPercent(horizontalPercent, true, previousState.rightPercent));
-  state.leftPercent  = max(state.leftPercent,  convertStickDeflectionToPercent(horizontalPercent, false, previousState.leftPercent));
-  state.backPercent  = max(state.backPercent,  convertStickDeflectionToPercent(verticalPercent, true, previousState.backPercent));
-  state.frontPercent = max(state.frontPercent, convertStickDeflectionToPercent(verticalPercent, false, previousState.frontPercent));
+  // previousState liefert die Hysterese: war eine Richtung schon aktiv, gilt die
+  // niedrigere Freigabeschwelle.
+  const JoyConControlState &previousState = isLeftJoyCon ? leftControlState : rightControlState;
+
+  if (isLeftJoyCon)
+  {
+    // Stick und Steuerkreuz wirken zusammen: es gilt der hoehere Wert.
+    state.leftPercent  = max(state.leftPercent,  convertStickDeflectionToPercent(horizontalPercent, true, previousState.leftPercent));
+    state.rightPercent = max(state.rightPercent, convertStickDeflectionToPercent(horizontalPercent, false, previousState.rightPercent));
+    state.backPercent  = max(state.backPercent,  convertStickDeflectionToPercent(verticalPercent, true, previousState.backPercent));
+    state.frontPercent = max(state.frontPercent, convertStickDeflectionToPercent(verticalPercent, false, previousState.frontPercent));
+  }
+  else if (isRightJoyCon)
+  {
+    state.downPercent = convertStickDeflectionToPercent(verticalPercent, true, previousState.downPercent);
+    state.upPercent   = convertStickDeflectionToPercent(verticalPercent, false, previousState.upPercent);
+  }
 
   return state;
 }

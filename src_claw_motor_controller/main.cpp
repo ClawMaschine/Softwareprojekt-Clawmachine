@@ -10,6 +10,12 @@
 static constexpr const char *MOTOR_COMMAND_TOPIC  = "clawmachine/motor_controller/motor/command";
 static constexpr const char *MOTOR_SETTINGS_TOPIC = "clawmachine/motor_controller/settings";
 static constexpr const char *ERROR_LOG_TOPIC      = "clawmachine/motor_controller/error_log";
+static constexpr const char *POSITION_TOPIC       = "clawmachine/motor_controller/position";
+// Position hoechstens so oft melden, solange sie sich aendert; ohne Aenderung als
+// Lebenszeichen alle paar Sekunden (der Server erkennt daran einen Neustart nicht,
+// aber hat nach seinem eigenen Neustart schnell wieder einen Wert).
+static constexpr unsigned long POSITION_PUBLISH_INTERVAL_MILLISECONDS   = 200;
+static constexpr unsigned long POSITION_HEARTBEAT_INTERVAL_MILLISECONDS = 5000;
 // PubSubClient hat standardmaessig nur 256 Byte Puffer pro Nachricht — der
 // zurueckgespiegelte Original-Payload wird deshalb gekuerzt.
 static constexpr size_t ERROR_LOG_MAX_PAYLOAD_LENGTH = 100;
@@ -112,10 +118,45 @@ void setup()
   otaUpdater.begin();
 }
 
+// Meldet die gezaehlten Schrittpositionen als JSON, z.B. {"X":1200,"Y":0,"Z":340}.
+void publishPositionIfDue()
+{
+  static long lastPublishedX = 0;
+  static long lastPublishedY = 0;
+  static long lastPublishedZ = 0;
+  static unsigned long lastPublishedAtMilliseconds = 0;
+  static bool hasPublishedOnce = false;
+
+  const unsigned long nowMilliseconds = millis();
+  const unsigned long elapsedMilliseconds = nowMilliseconds - lastPublishedAtMilliseconds;
+  const long x = movementController.getPosition('X');
+  const long y = movementController.getPosition('Y');
+  const long z = movementController.getPosition('Z');
+  const bool hasChanged = x != lastPublishedX || y != lastPublishedY || z != lastPublishedZ;
+
+  const bool isDue = !hasPublishedOnce ||
+                     (hasChanged && elapsedMilliseconds >= POSITION_PUBLISH_INTERVAL_MILLISECONDS) ||
+                     elapsedMilliseconds >= POSITION_HEARTBEAT_INTERVAL_MILLISECONDS;
+  if (!isDue) {
+    return;
+  }
+
+  char payload[80];
+  snprintf(payload, sizeof(payload), "{\"X\":%ld,\"Y\":%ld,\"Z\":%ld}", x, y, z);
+  motorControllerConnection.publish(POSITION_TOPIC, payload);
+
+  lastPublishedX = x;
+  lastPublishedY = y;
+  lastPublishedZ = z;
+  lastPublishedAtMilliseconds = nowMilliseconds;
+  hasPublishedOnce = true;
+}
+
 void loop()
 {
   motorControllerConnection.maintainConnection();
   movementController.update();
+  publishPositionIfDue();
 }
 
 
@@ -190,6 +231,24 @@ void applyMotorCommand(const char *topic, const String &message)
     if (axisText.length() != 1 || !movementController.stopAxisImmediately(axisText.charAt(0))) {
       publishErrorLog(topic, message, "Unbekannte Achse beim Sofortstopp");
     }
+  } else if (message.startsWith("zero:")) {
+    // "zero:X" - aktuelle Stellung der Achse ist Position 0 (Endstop erreicht)
+    const String axisText = message.substring(5);
+    if (axisText.length() != 1 || !movementController.zeroPosition(axisText.charAt(0))) {
+      publishErrorLog(topic, message, "Unbekannte Achse beim Nullsetzen");
+    }
+  } else if (message.startsWith("goto:")) {
+    // "goto:X:1200:50" - Achse X mit 50 % Geschwindigkeit zu Position 1200 (Schritte) fahren
+    char axis = 0;
+    long steps = 0;
+    int speedPercent = 0;
+    if (sscanf(message.c_str() + 5, "%c:%ld:%d", &axis, &steps, &speedPercent) != 3) {
+      publishErrorLog(topic, message, "goto erwartet Achse:Schritte:Prozent");
+      return;
+    }
+    if (!movementController.moveToPosition(axis, steps, speedPercent)) {
+      publishErrorLog(topic, message, "Unbekannte Achse bei goto");
+    }
   } else if (message.startsWith("claw:")) {
     if (!movementController.moveClaw(message.substring(5).c_str())) {
       publishErrorLog(topic, message, "Unbekannter Klauen-Befehl");
@@ -223,7 +282,8 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
 
   if (strcmp(topic, MOTOR_SETTINGS_TOPIC) == 0) {
     // JSON-Settings-Update, z.B. {"accelerationPercentPerSecond": 50} (alle Achsen), {"xyAccelerationPercentPerSecond": 50},
-    // {"zAccelerationPercentPerSecond": 50}, {"clawSpeedDegreesPerSecond": 35} oder {"clawJogSpeedDegreesPerSecond": 10}
+    // {"zAccelerationPercentPerSecond": 50}, {"xyMaxRevolutionsPerMinute": 120}, {"zMaxRevolutionsPerMinute": 120},
+    // {"clawSpeedDegreesPerSecond": 35} oder {"clawJogSpeedDegreesPerSecond": 10}
     JsonDocument jsonDoc;
     DeserializationError error = deserializeJson(jsonDoc, message);
     if (error) {
@@ -244,6 +304,14 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
       movementController.setZAcceleration(jsonDoc["zAccelerationPercentPerSecond"].as<float>());
       hasKnownSetting = true;
     }
+    if (jsonDoc["xyMaxRevolutionsPerMinute"].is<unsigned int>()) {
+      movementController.setXyMaxRevolutionsPerMinute(jsonDoc["xyMaxRevolutionsPerMinute"].as<uint16_t>());
+      hasKnownSetting = true;
+    }
+    if (jsonDoc["zMaxRevolutionsPerMinute"].is<unsigned int>()) {
+      movementController.setZMaxRevolutionsPerMinute(jsonDoc["zMaxRevolutionsPerMinute"].as<uint16_t>());
+      hasKnownSetting = true;
+    }
     if (jsonDoc["clawJogSpeedDegreesPerSecond"].is<float>()) {
       movementController.setClawJogSpeed(jsonDoc["clawJogSpeedDegreesPerSecond"].as<float>());
       hasKnownSetting = true;
@@ -254,7 +322,7 @@ void onMqttMessage(char *topic, uint8_t *payload, unsigned int length)
     }
     if (!hasKnownSetting) {
       publishErrorLog(topic, message,
-                      "Keine bekannte Einstellung (accelerationPercentPerSecond, xy/zAccelerationPercentPerSecond, clawSpeedDegreesPerSecond) oder keine Zahl");
+                      "Keine bekannte Einstellung (accelerationPercentPerSecond, xy/zAccelerationPercentPerSecond, xy/zMaxRevolutionsPerMinute, clawSpeedDegreesPerSecond) oder keine Zahl");
     }
   } else if (strcmp(topic, MOTOR_COMMAND_TOPIC) == 0) {
     applyMotorCommand(topic, message);

@@ -38,6 +38,8 @@ CONTROL_TOPIC = build_topic("claw")
 MOTOR_CONTROLLER_COMMAND_TOPIC = device_topic("motor_controller", "motor", "command")
 # JSON-Settings-Update (z.B. Beschleunigung), getrennt von den Bewegungsbefehlen
 MOTOR_CONTROLLER_SETTINGS_TOPIC = device_topic("motor_controller", "settings")
+# Motor-Controller -> Server: gezaehlte Schrittpositionen {"X":..,"Y":..,"Z":..}
+MOTOR_CONTROLLER_POSITION_TOPIC = device_topic("motor_controller", "position")
 
 # Eingabegeräte -> Server
 PLAYER_INPUT_PANEL_TOPIC = device_topic("player_input", "panel")
@@ -59,3 +61,5 @@ WEB_INTERFACE_SPEED_SETTINGS_REQUEST_TOPIC = web_interface_topic(
     "speed_settings", "request"
 )
 WEB_INTERFACE_START_HOMING_TOPIC = web_interface_topic("start_homing")
+WEB_INTERFACE_POSITION_TOPIC = web_interface_topic("position")
+WEB_INTERFACE_POSITION_REQUEST_TOPIC = web_interface_topic("position", "request")

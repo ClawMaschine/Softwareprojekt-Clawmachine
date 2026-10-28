@@ -7,6 +7,7 @@ try:
     from python_server.configuration_loader import (
         load_motor_speed_configuration,
         load_mqtt_configuration,
+        load_positioning_configuration,
     )
     from python_server.mqtt import MQTTClient
     from python_server.clawmachine.device_registry import DeviceRegistry
@@ -18,6 +19,7 @@ try:
         CONTROL_TOPIC,
         ENDSTOP_TOPIC,
         MOTOR_CONTROLLER_COMMAND_TOPIC,
+        MOTOR_CONTROLLER_POSITION_TOPIC,
         MOTOR_CONTROLLER_SETTINGS_TOPIC,
         PLAYER_INPUT_JOYCON_TOPIC,
         PLAYER_INPUT_PANEL_TOPIC,
@@ -28,6 +30,8 @@ try:
         WEB_INTERFACE_INPUT_SOURCES_REQUEST_TOPIC,
         WEB_INTERFACE_INPUT_SOURCES_SET_TOPIC,
         WEB_INTERFACE_INPUT_SOURCES_TOPIC,
+        WEB_INTERFACE_POSITION_REQUEST_TOPIC,
+        WEB_INTERFACE_POSITION_TOPIC,
         WEB_INTERFACE_SPEED_SETTINGS_REQUEST_TOPIC,
         WEB_INTERFACE_SPEED_SETTINGS_TOPIC,
         device_topic,
@@ -37,6 +41,7 @@ except ModuleNotFoundError:
     from configuration_loader import (
         load_motor_speed_configuration,
         load_mqtt_configuration,
+        load_positioning_configuration,
     )
     from mqtt import MQTTClient
     from device_registry import DeviceRegistry
@@ -48,6 +53,7 @@ except ModuleNotFoundError:
         CONTROL_TOPIC,
         ENDSTOP_TOPIC,
         MOTOR_CONTROLLER_COMMAND_TOPIC,
+        MOTOR_CONTROLLER_POSITION_TOPIC,
         MOTOR_CONTROLLER_SETTINGS_TOPIC,
         PLAYER_INPUT_JOYCON_TOPIC,
         PLAYER_INPUT_PANEL_TOPIC,
@@ -58,6 +64,8 @@ except ModuleNotFoundError:
         WEB_INTERFACE_INPUT_SOURCES_REQUEST_TOPIC,
         WEB_INTERFACE_INPUT_SOURCES_SET_TOPIC,
         WEB_INTERFACE_INPUT_SOURCES_TOPIC,
+        WEB_INTERFACE_POSITION_REQUEST_TOPIC,
+        WEB_INTERFACE_POSITION_TOPIC,
         WEB_INTERFACE_SPEED_SETTINGS_REQUEST_TOPIC,
         WEB_INTERFACE_SPEED_SETTINGS_TOPIC,
         device_topic,
@@ -87,6 +95,11 @@ WEB_INTERFACE_DEVICE_PREFIX = "claw_web_interface_"
 # Client-ID des Motor-Controller-ESP (CLAW_MOTOR_CONTROLLER_CLIENT_ID) — sobald
 # er sich (neu) meldet, bekommt er die Klauen-Geschwindigkeit nachgeschickt.
 MOTOR_CONTROLLER_DEVICE_NAME = "claw_motor_controller"
+# Fahrbereich der Klaue in Grad (kleiner = offen, groesser = zu), entspricht
+# MIN_/MAX_ALLOWED_ANGLE_DEGREES in lib/claw_motor/claw_servo_motor.h. Das Panel-Poti
+# (0-100 %) wird darauf abgebildet.
+CLAW_OPEN_ANGLE_DEGREES = 90
+CLAW_CLOSED_ANGLE_DEGREES = 160
 # Client-ID des Endstop-Boards (CLAW_ENDSTOP_CLIENT_ID)
 ENDSTOP_DEVICE_NAME = "claw_endstop"
 
@@ -113,7 +126,14 @@ class ClawMachine:
             motor_speed_configuration.claw_degrees_per_second
         )
         self.claw_jog_state = "stop"
-        self.move_controller = Moving(self.mqtt_client, motor_speed_configuration)
+        # Zuletzt aus dem Panel-Poti gesendeter Klauenwinkel; verhindert, dass bei jeder
+        # Panel-Nachricht (auch bei anderen Tasten) derselbe Winkel erneut rausgeht.
+        self.last_panel_claw_angle = None
+        self.move_controller = Moving(
+            self.mqtt_client,
+            motor_speed_configuration,
+            load_positioning_configuration(),
+        )
         self.web_interface_presence = WebInterfacePresence()
         self.input_source_control = InputSourceControl(
             INPUT_SOURCE_NAME_BY_TOPIC.values()
@@ -160,6 +180,8 @@ class ClawMachine:
         self.mqtt_client.subscribe(WEB_INTERFACE_INPUT_SOURCES_SET_TOPIC)
         self.mqtt_client.subscribe(WEB_INTERFACE_SPEED_SETTINGS_REQUEST_TOPIC)
         self.mqtt_client.subscribe(ENDSTOP_TOPIC)
+        self.mqtt_client.subscribe(MOTOR_CONTROLLER_POSITION_TOPIC)
+        self.mqtt_client.subscribe(WEB_INTERFACE_POSITION_REQUEST_TOPIC)
         mqtt_network_client.on_message = self.on_message
 
     def ensure_device_registered(self, esp_name: str) -> Optional[EspDevice]:
@@ -186,6 +208,17 @@ class ClawMachine:
             )
         )
 
+    def update_claw_position_from_percent(self, percent: int):
+        # Poti am Panel: 0 % = Klaue offen, 100 % = Klaue zu, linear dazwischen.
+        angle = round(
+            CLAW_OPEN_ANGLE_DEGREES
+            + (CLAW_CLOSED_ANGLE_DEGREES - CLAW_OPEN_ANGLE_DEGREES) * percent / 100
+        )
+        if angle == self.last_panel_claw_angle:
+            return
+        self.last_panel_claw_angle = angle
+        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"claw:{angle}")
+
     def update_claw_jog(self, is_open_pressed: bool, is_close_pressed: bool):
         # Gehaltene Taste -> Klaue faehrt langsam auf/zu (claw:jog_open / claw:jog_close),
         # Loslassen -> claw:stop haelt sie sofort an der aktuellen Position an.
@@ -208,6 +241,8 @@ class ClawMachine:
                 {
                     "clawSpeedDegreesPerSecond": self.claw_speed_degrees_per_second,
                     "clawJogSpeedDegreesPerSecond": self.move_controller.motor_speed_configuration.claw_jog_degrees_per_second,
+                    "xyMaxRevolutionsPerMinute": self.move_controller.motor_speed_configuration.xy_max_revolutions_per_minute,
+                    "zMaxRevolutionsPerMinute": self.move_controller.motor_speed_configuration.z_max_revolutions_per_minute,
                     "xyAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second(
                         "X"
                     ),
@@ -237,6 +272,44 @@ class ClawMachine:
                 }
             ),
         )
+
+    def publish_position(self):
+        # Position in Schritten (0 = Endstop), ob sie gilt (isReferenced), laufende Ziele und
+        # der konfigurierte Verfahrweg fuer die Anzeige im Webinterface. Wird bei jeder
+        # Meldung des Motor-Controllers weitergereicht, plus auf Anfrage.
+        moving = self.move_controller
+        self.mqtt_client.publish(
+            WEB_INTERFACE_POSITION_TOPIC,
+            json.dumps(
+                {
+                    "position": moving.step_position,
+                    "isReferenced": moving.is_referenced,
+                    "gotoTargets": moving.goto_target,
+                    "travelSteps": moving.positioning_configuration.travel_steps_by_axis,
+                }
+            ),
+        )
+
+    def go_to_from_command(self, value: str):
+        # "goto:<x>,<y>,<z>" — leere Felder lassen die Achse stehen, z.B. "goto:1200,,300"
+        fields = value.split(",")
+        if len(fields) != 3:
+            print(f"Invalid goto command: {value}")
+            return
+        targets = {}
+        for axis, field in zip(("X", "Y", "Z"), fields):
+            field = field.strip()
+            if not field:
+                continue
+            try:
+                targets[axis] = int(float(field))
+            except ValueError:
+                print(f"Invalid goto value: {value}")
+                return
+        if not targets:
+            return
+        self.move_controller.go_to_position(targets)
+        self.publish_position()
 
     def publish_device_list(self):
         # Antwort auf WEB_INTERFACE_DEVICE_LIST_REQUEST_TOPIC — wird nur auf Anfrage
@@ -285,6 +358,19 @@ class ClawMachine:
                     return
                 self.move_controller.update_endstop_status(endstop_state)
                 self.mqtt_client.publish(WEB_INTERFACE_ENDSTOP_TOPIC, payload_text)
+
+            case _ if topic == MOTOR_CONTROLLER_POSITION_TOPIC:
+                # Vom Motor-Controller gezaehlte Schritte, z.B. {"X":1200,"Y":0,"Z":340}
+                try:
+                    position_state = json.loads(payload_text)
+                except json.JSONDecodeError:
+                    print(f"Invalid position received: {payload_text}")
+                    return
+                self.move_controller.update_position(position_state)
+                self.publish_position()
+
+            case _ if topic == WEB_INTERFACE_POSITION_REQUEST_TOPIC:
+                self.publish_position()
 
             case _ if (
                 topic in PLAYER_INPUT_TOPICS or topic == WEB_INTERFACE_COMMAND_TOPIC
@@ -353,6 +439,10 @@ class ClawMachine:
                         web_interface_id, payload_text == "online"
                     )
                 else:
+                    if esp_name == MOTOR_CONTROLLER_DEVICE_NAME:
+                        # Online wie offline: nach einem Neustart zaehlt der Motor-Controller
+                        # wieder ab 0, die Position gilt erst nach erneutem Homing.
+                        self.move_controller.on_motor_controller_restarted()
                     device = self.ensure_device_registered(esp_name)
                     if device is not None:
                         device.is_online = payload_text == "online"
@@ -384,11 +474,14 @@ class ClawMachine:
                 # (gedrueckt = 100 %), der Joy-Con direkt 0-100.
                 is_percent_source = topic == PLAYER_INPUT_JOYCON_TOPIC
                 for button_name, button_value in panel_buttons.items():
-                    if is_percent_source:
+                    # Das Klauen-Poti des Panels kommt schon in Prozent (0-100)
+                    if is_percent_source or button_name == "claw":
                         panel_buttons[button_name] = max(0, min(100, int(button_value)))
                     else:
                         panel_buttons[button_name] = 100 if button_value else 0
                 self.panel_button_state.update(panel_buttons)
+                if topic == PLAYER_INPUT_PANEL_TOPIC and "claw" in panel_buttons:
+                    self.update_claw_position_from_percent(panel_buttons["claw"])
 
                 # Gegenueberliegende Richtungen ergeben die Differenz (-100..100,
                 # Vorzeichen = Richtung). Skalierung auf die Standard-Geschwindigkeit
@@ -455,6 +548,11 @@ class ClawMachine:
                         self.move_controller.set_acceleration("Z", acceleration)
                     self.publish_motor_settings()
                     self.publish_speed_settings()
+                elif name == "goto":
+                    self.go_to_from_command(value)
+                elif name == "goto_cancel":
+                    self.move_controller.cancel_goto()
+                    self.publish_position()
                 elif name == "home":
                     # Referenzfahrt aller Achsen (X, Y, Z nacheinander) neu starten
                     self.move_controller.start_homing_sequence()

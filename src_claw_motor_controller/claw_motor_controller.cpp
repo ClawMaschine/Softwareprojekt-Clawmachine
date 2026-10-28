@@ -126,6 +126,76 @@ void ClawMotorController::setZAcceleration(float percentPerSecond)
   Serial.printf("[MOTOR] Beschleunigung Z geaendert: %.1f %%/s\n", percentPerSecond);
 }
 
+void ClawMotorController::setXyMaxRevolutionsPerMinute(uint16_t revolutionsPerMinute)
+{
+  xMotorLeft.setMaxRevolutionsPerMinute(revolutionsPerMinute);
+  yMotor.setMaxRevolutionsPerMinute(revolutionsPerMinute);
+  xMotorRight.setMaxRevolutionsPerMinute(revolutionsPerMinute);
+
+  Serial.printf("[MOTOR] Max. Drehzahl X/Y geaendert: %u RPM\n", revolutionsPerMinute);
+}
+
+void ClawMotorController::setZMaxRevolutionsPerMinute(uint16_t revolutionsPerMinute)
+{
+  zMotor.setMaxRevolutionsPerMinute(revolutionsPerMinute);
+
+  Serial.printf("[MOTOR] Max. Drehzahl Z geaendert: %u RPM\n", revolutionsPerMinute);
+}
+
+// Die Motoren zaehlen in ihrer physischen Drehrichtung. Die Vorzeichen hier sind dieselben
+// wie in move(): X rechts +1, Y und Z -1 (X links gegensinnig, wird ueber den rechten Motor gelesen).
+long ClawMotorController::getPosition(char axis) const
+{
+  switch (axis) {
+    case 'X': return xMotorRight.getStepPosition();
+    case 'Y': return -yMotor.getStepPosition();
+    case 'Z': return -zMotor.getStepPosition();
+    default:  return 0;
+  }
+}
+
+bool ClawMotorController::zeroPosition(char axis)
+{
+  switch (axis) {
+    case 'X':
+      xMotorLeft.resetStepPosition(0);
+      xMotorRight.resetStepPosition(0);
+      break;
+    case 'Y':
+      yMotor.resetStepPosition(0);
+      break;
+    case 'Z':
+      zMotor.resetStepPosition(0);
+      break;
+    default:
+      Serial.printf("[MOTOR] Unbekannte Achse: %c\n", axis);
+      return false;
+  }
+  Serial.printf("[MOTOR] %c: Position auf 0 gesetzt\n", axis);
+  return true;
+}
+
+bool ClawMotorController::moveToPosition(char axis, long steps, int speedPercent)
+{
+  switch (axis) {
+    case 'X':
+      xMotorRight.moveToStepPosition(steps, speedPercent);
+      xMotorLeft.moveToStepPosition(-steps, speedPercent);
+      break;
+    case 'Y':
+      yMotor.moveToStepPosition(-steps, speedPercent);
+      break;
+    case 'Z':
+      zMotor.moveToStepPosition(-steps, speedPercent);
+      break;
+    default:
+      Serial.printf("[MOTOR] Unbekannte Achse: %c\n", axis);
+      return false;
+  }
+  Serial.printf("[MOTOR] %c: Fahre zu Position %ld mit %d %%\n", axis, steps, speedPercent);
+  return true;
+}
+
 bool ClawMotorController::stopAxisImmediately(char axis)
 {
   switch (axis) {

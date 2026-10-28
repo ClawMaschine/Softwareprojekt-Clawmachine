@@ -16,6 +16,7 @@ void ClawStepperMotor::begin()
 
 void ClawStepperMotor::setSpeed(int speedPercent)
 {
+  hasTargetStepPosition = false;
   targetSpeedPercent = constrain(speedPercent, -100, 100);
 
   if (accelerationPercentPerSecond <= 0) {
@@ -26,13 +27,49 @@ void ClawStepperMotor::setSpeed(int speedPercent)
 
 void ClawStepperMotor::stopImmediately()
 {
+  hasTargetStepPosition = false;
   targetSpeedPercent = 0;
   applySpeed(0);
+}
+
+long ClawStepperMotor::getStepPosition() const
+{
+  return stepPosition;
+}
+
+void ClawStepperMotor::resetStepPosition(long newStepPosition)
+{
+  stepPosition = newStepPosition;
+  // Eine laufende Zielfahrt bezog sich auf das alte Koordinatensystem.
+  if (hasTargetStepPosition) {
+    stopImmediately();
+  }
+}
+
+void ClawStepperMotor::moveToStepPosition(long targetStepPositionValue, int speedPercent)
+{
+  const long stepsToGo = targetStepPositionValue - stepPosition;
+  if (stepsToGo == 0) {
+    stopImmediately();
+    return;
+  }
+
+  const int speedMagnitudePercent = abs(speedPercent);
+  setSpeed(stepsToGo > 0 ? speedMagnitudePercent : -speedMagnitudePercent);
+  // Nach setSpeed(), das die Zielfahrt sonst gleich wieder verwirft.
+  hasTargetStepPosition = true;
+  targetStepPosition    = targetStepPositionValue;
 }
 
 void ClawStepperMotor::setAcceleration(float percentPerSecond)
 {
   accelerationPercentPerSecond = max(percentPerSecond, 0.0f);
+}
+
+void ClawStepperMotor::setMaxRevolutionsPerMinute(uint16_t newMaxRevolutionsPerMinute)
+{
+  maxRevolutionsPerMinute = newMaxRevolutionsPerMinute;
+  applySpeed(currentSpeedPercent);
 }
 
 void ClawStepperMotor::applySpeed(float speedPercent)
@@ -102,5 +139,12 @@ void ClawStepperMotor::update()
   }
 
   lastStepMicroseconds = nowMicroseconds;
-  stepperMotor->onestep(currentSpeedPercent > 0 ? FORWARD : BACKWARD, DOUBLE);
+  const bool isMovingForward = currentSpeedPercent > 0;
+  stepperMotor->onestep(isMovingForward ? FORWARD : BACKWARD, DOUBLE);
+  stepPosition += isMovingForward ? 1 : -1;
+
+  if (hasTargetStepPosition &&
+      (isMovingForward ? stepPosition >= targetStepPosition : stepPosition <= targetStepPosition)) {
+    stopImmediately();
+  }
 }

@@ -65,6 +65,28 @@ def load_camera_configuration() -> CameraConfiguration:
 
 
 @dataclass(frozen=True)
+class PositioningConfiguration:
+    goto_percent: int
+    # Verfahrweg je Achse in Schritten, 0 = unbegrenzt
+    travel_steps_by_axis: dict
+
+
+def load_positioning_configuration() -> PositioningConfiguration:
+    config_parser = ConfigParser()
+    project_root = Path(__file__).parent.parent
+    config_parser.read([project_root / "config.ini", project_root / "config.local.ini"])
+
+    goto_percent = config_parser.getint("positioning", "goto_percent", fallback=50)
+    return PositioningConfiguration(
+        goto_percent=max(1, min(100, goto_percent)),
+        travel_steps_by_axis={
+            axis: max(0, config_parser.getint("positioning", f"{axis.lower()}_travel_steps", fallback=0))
+            for axis in ("X", "Y", "Z")
+        },
+    )
+
+
+@dataclass(frozen=True)
 class MotorSpeedConfiguration:
     xy_percent: int
     z_percent: int
@@ -73,6 +95,9 @@ class MotorSpeedConfiguration:
     claw_degrees_per_second: float
     claw_jog_degrees_per_second: float
     minimum_percent: int
+    xy_max_revolutions_per_minute: int
+    z_max_revolutions_per_minute: int
+    homing_percent: int
 
 
 def load_motor_speed_configuration() -> MotorSpeedConfiguration:
@@ -93,7 +118,14 @@ def load_motor_speed_configuration() -> MotorSpeedConfiguration:
     )
     minimum_percent = config_parser.getint("motor_speed", "minimum_percent", fallback=15)
 
+    xy_max_revolutions_per_minute = config_parser.getint("motor_speed", "xy_max_rpm", fallback=120)
+    z_max_revolutions_per_minute = config_parser.getint("motor_speed", "z_max_rpm", fallback=120)
+    homing_percent = config_parser.getint("motor_speed", "homing_percent", fallback=30)
+
     return MotorSpeedConfiguration(
+        xy_max_revolutions_per_minute=max(1, xy_max_revolutions_per_minute),
+        z_max_revolutions_per_minute=max(1, z_max_revolutions_per_minute),
+        homing_percent=max(1, min(100, homing_percent)),
         minimum_percent=max(0, min(100, minimum_percent)),
         xy_percent=max(0, min(100, xy_percent)),
         z_percent=max(0, min(100, z_percent)),

@@ -46,6 +46,18 @@ export interface SpeedSettings {
   zAccelerationPercentPerSecond: number;
 }
 
+// Position in Schritten (0 = Endstop), vom Server gepusht (siehe publish_position() in
+// claw_machine.py). isReferenced: false, solange nach einem Neustart des Motor-Controllers
+// noch kein Homing lief — dann gilt die Position nicht und Zielfahrten werden abgelehnt.
+export type AxisName = 'X' | 'Y' | 'Z';
+export interface PositionState {
+  position: Record<AxisName, number>;
+  isReferenced: Record<AxisName, boolean>;
+  gotoTargets: Record<AxisName, number | null>;
+  // Verfahrweg je Achse in Schritten, 0 = nicht konfiguriert
+  travelSteps: Record<AxisName, number>;
+}
+
 const CLAWMACHINE_TOPIC_PREFIX = 'clawmachine/';
 
 // Haupt-Steuertopic des Servers — Befehle mit X:/Y:/Z:/claw:-Präfix werden
@@ -72,6 +84,8 @@ const INPUT_SOURCES_REQUEST_TOPIC = 'clawmachine/web_interface/input_sources/req
 const INPUT_SOURCES_TOPIC = 'clawmachine/web_interface/input_sources';
 const INPUT_SOURCES_SET_TOPIC = 'clawmachine/web_interface/input_sources/set';
 const SPEED_SETTINGS_REQUEST_TOPIC = 'clawmachine/web_interface/speed_settings/request';
+const POSITION_TOPIC = 'clawmachine/web_interface/position';
+const POSITION_REQUEST_TOPIC = 'clawmachine/web_interface/position/request';
 const SPEED_SETTINGS_TOPIC = 'clawmachine/web_interface/speed_settings';
 
 // Wie bei den ESP-Boards: eigenes Status-Topic mit Last-Will (siehe
@@ -135,6 +149,9 @@ export class MqttService implements OnDestroy {
   // Aktuell am Server eingestellte Geschwindigkeiten; null, solange noch keine Antwort da ist.
   readonly speedSettings$ = new BehaviorSubject<SpeedSettings | null>(null);
 
+  // Letzte Position vom Server; null, solange noch keine Meldung da ist.
+  readonly positionState$ = new BehaviorSubject<PositionState | null>(null);
+
   private deviceListRefreshSubscription: Subscription | null = null;
 
   // Einmal pro Tab/Instanz erzeugt (nicht pro connect()-Aufruf), damit die ID
@@ -184,6 +201,7 @@ export class MqttService implements OnDestroy {
       // ungefragt gepusht (siehe publish_input_sources() in claw_machine.py).
       this.requestInputSources();
       this.requestSpeedSettings();
+      this.client!.publish(POSITION_REQUEST_TOPIC, '');
     });
 
     this.client.on('message', (topic: string, payload: Buffer) => {
@@ -276,6 +294,15 @@ export class MqttService implements OnDestroy {
 
     if (topic === SPEED_SETTINGS_TOPIC) {
       this.applySpeedSettings(payload);
+      return;
+    }
+
+    if (topic === POSITION_TOPIC) {
+      try {
+        this.positionState$.next(JSON.parse(payload) as PositionState);
+      } catch {
+        // ungueltige Meldung ignorieren
+      }
       return;
     }
 

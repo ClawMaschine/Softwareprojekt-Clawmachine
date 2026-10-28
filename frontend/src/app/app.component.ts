@@ -9,6 +9,8 @@ import {
   MessageLog,
   EndstopState,
   InputSourcesState,
+  PositionState,
+  AxisName,
 } from './services/mqtt.service';
 import { DeviceCardComponent } from './components/device-card/device-card.component';
 import { EndstopIconComponent } from './components/endstop-icon/endstop-icon.component';
@@ -32,6 +34,12 @@ export class AppComponent implements OnInit, OnDestroy {
   deviceLogs: Record<string, MessageLog[]> = {};
   endstopState: EndstopState = { x1: false, x2: false, y1: false, y2: false, z1: false };
   inputSources: InputSourcesState = {};
+
+  // Position in Schritten (0 = Endstop) und Zielfelder fuer "Zu Position fahren".
+  // Leeres Feld = Achse stehen lassen.
+  positionState: PositionState | null = null;
+  readonly positionAxes: AxisName[] = ['X', 'Y', 'Z'];
+  gotoTargetInputs: Record<AxisName, number | null> = { X: null, Y: null, Z: null };
 
   // Standard-Geschwindigkeiten (Prozent der max. Drehzahl) bzw. Klaue (Grad pro
   // Sekunde). Gelten am Server (siehe [motor_speed] in config.ini) und werden von
@@ -70,6 +78,7 @@ export class AppComponent implements OnInit, OnDestroy {
       this.mqttService.deviceLogs$.subscribe(l => (this.deviceLogs = l)),
       this.mqttService.endstopState$.subscribe(e => (this.endstopState = e)),
       this.mqttService.inputSources$.subscribe(s => (this.inputSources = s)),
+      this.mqttService.positionState$.subscribe(p => (this.positionState = p)),
       this.mqttService.speedSettings$.subscribe(settings => {
         if (settings) {
           this.xySpeedPercent = settings.xyPercent;
@@ -143,6 +152,22 @@ export class AppComponent implements OnInit, OnDestroy {
 
   stopMoveY(): void {
     this.mqttService.publishCommand('front:0');
+  }
+
+  // "goto:<x>,<y>,<z>" — leere Felder lassen die Achse stehen.
+  sendGoto(): void {
+    const fields = this.positionAxes.map(axis => {
+      const value = this.gotoTargetInputs[axis];
+      return value === null || value === undefined ? '' : String(Math.round(value));
+    });
+    if (fields.every(field => field === '')) {
+      return;
+    }
+    this.mqttService.publishCommand(`goto:${fields.join(',')}`);
+  }
+
+  cancelGoto(): void {
+    this.mqttService.publishCommand('goto_cancel');
   }
 
   startHoming(): void {
