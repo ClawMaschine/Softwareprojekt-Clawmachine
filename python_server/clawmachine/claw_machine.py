@@ -51,8 +51,8 @@ MOTOR_COMMAND_PREFIXES = ("X:", "Y:", "Z:", "claw:")
 
 PLAYER_INPUT_PANEL_TOPIC = "clawmachine/player_input/panel"
 # Nintendo-Switch-2-Joy-Con, gesendet von src_claw_switch2_scanner. Gleiches
-# JSON-Format wie das Control-Panel, deshalb dieselbe Auswertung — nur ohne
-# grab/release, die beim Joy-Con keine Entsprechung haben.
+# JSON-Format wie das Control-Panel, deshalb dieselbe Auswertung: die Achsen
+# aus up/down/left/right/front/back, die Klaue aus clawOpen/clawClose.
 PLAYER_INPUT_JOYCON_TOPIC = "clawmachine/player_input/joycon"
 PLAYER_INPUT_TOPICS = (PLAYER_INPUT_PANEL_TOPIC, PLAYER_INPUT_JOYCON_TOPIC)
 WEBINTERFACE_COMMAND_TOPIC = "clawmachine/web_interface/command"
@@ -206,6 +206,10 @@ class ClawMachine:
         match topic:
             case _ if topic in PLAYER_INPUT_TOPICS:
                 panel_buttons = json.loads(payload_text)
+                # Für die Klaue wird die Flanke gebraucht (siehe
+                # publish_claw_command_on_button_press), deshalb den alten
+                # Zustand vor dem Zusammenführen festhalten.
+                previous_button_state = dict(self.panel_button_state)
                 self.panel_button_state.update(panel_buttons)
 
                 if self.panel_button_state.get("right"):
@@ -232,6 +236,7 @@ class ClawMachine:
                 self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"X:{x_speed}")
                 self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"Y:{y_speed}")
                 self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"Z:{z_speed}")
+                self.publish_claw_command_on_button_press(previous_button_state)
             # 6) Steuerbefehl vom Webinterface (z.B. "left:80", "front:-80",
             #    "claw:open") — das Webinterface rechnet die Geschwindigkeit
             #    schon selbst aus (siehe app.component.ts), der Server muss
@@ -261,6 +266,22 @@ class ClawMachine:
                 else:
                     print(f"Unknown webinterface command: {payload_text}")
 
+
+    def publish_claw_command_on_button_press(self, previous_button_state: dict):
+        # clawOpen/clawClose kommen vom Joy-Con bzw. Control-Panel als Prozent,
+        # genau wie die Achsen — die Klaue hängt aber an einem Servo, der nur
+        # die beiden Endlagen auf/zu kennt (siehe moveClaw() in
+        # src_claw_motor_controller/claw_motor_controller.cpp). Es gibt hier
+        # also keine Geschwindigkeit und kein "Stop" beim Loslassen, deshalb
+        # pro Tastendruck genau ein Befehl: nur bei der Flanke von "nicht
+        # gedrückt" nach "gedrückt".
+        for button_name, claw_command in (("clawOpen", "open"), ("clawClose", "close")):
+            was_button_pressed = bool(previous_button_state.get(button_name))
+            is_button_pressed = bool(self.panel_button_state.get(button_name))
+            if is_button_pressed and not was_button_pressed:
+                self.mqtt_client.publish(
+                    MOTOR_CONTROLLER_COMMAND_TOPIC, f"claw:{claw_command}"
+                )
 
     def main_loop(self):
         while True:
