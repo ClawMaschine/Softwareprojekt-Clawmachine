@@ -80,9 +80,9 @@ HOSTAPD_CONF = Path("/etc/hostapd/hostapd.conf")  # systemd-Unit prüft genau di
 DNSMASQ_CONF = Path("/etc/dnsmasq.d/clawmachine-hotspot.conf")
 NM_UNMANAGED_CONF = Path("/etc/NetworkManager/conf.d/99-clawmachine-unmanaged.conf")
 WLAN_IP_SERVICE = Path("/etc/systemd/system/clawmachine-wlan-ip.service")
-# Docker erst nach IP + Hotspot starten: captive-dns bindet fest an AP_IP und beendet sich sonst
 # Fuehrt dieses Skript mit -y bei jedem Boot aus (stellt den Hotspot bei Bedarf wieder her)
 HOTSPOT_BOOT_SERVICE = Path("/etc/systemd/system/clawmachine-hotspot-boot.service")
+# Docker erst nach IP + Hotspot starten: captive-dns bindet fest an AP_IP und beendet sich sonst
 DOCKER_DROPIN = Path("/etc/systemd/system/docker.service.d/clawmachine-after-hotspot.conf")
 
 
@@ -386,7 +386,9 @@ def _write_hotspot_boot_service() -> None:
     HOTSPOT_BOOT_SERVICE.write_text(
         "[Unit]\n"
         "Description=Clawmachine – Hotspot beim Boot pruefen/einrichten\n"
-        "After=network-pre.target\n"
+        # Nach hostapd/dnsmasq, damit der Zustandscheck des Skripts nicht in deren
+        # Startphase faellt und den Hotspot bei jedem Boot unnoetig neu aufbaut.
+        "After=network-pre.target clawmachine-wlan-ip.service hostapd.service dnsmasq.service\n"
         "Wants=network-pre.target\n"
         "Before=docker.service\n\n"
         "[Service]\n"
@@ -497,7 +499,7 @@ def _apply(iface: str, state: dict) -> None:
     )
     _run_required(["systemctl", "enable", "--now", "hostapd"], "Aktiviere + starte hostapd")
     _run_required(["systemctl", "enable", "--now", "dnsmasq"], "Aktiviere + starte dnsmasq")
-    # Docker beim Boot starten (Container haben restart: unless-stopped, u.a. captive-dns)
+    # Docker beim Boot starten (Container haben restart: always/unless-stopped, u.a. captive-dns)
     _run(["systemctl", "enable", "docker"])
     # Nur enable (ohne --now): der Boot-Dienst ruft dieses Skript selbst auf
     _run_required(["systemctl", "enable", "clawmachine-hotspot-boot.service"], "Aktiviere Hotspot-Boot-Dienst")
