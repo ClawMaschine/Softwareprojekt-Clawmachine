@@ -156,7 +156,8 @@ export class AppComponent implements OnInit, OnDestroy {
 
   gotoStart():void 
   {
-    this.mqttService.publishCommand(`goto:2200,100,1500`);
+    this.mqttService.publishCommand(`goto:2200,100,250`);
+    this.mqttService.publishCommand(`claw:open`);
   }
 
   // "goto:<x>,<y>,<z>" — leere Felder lassen die Achse stehen.
