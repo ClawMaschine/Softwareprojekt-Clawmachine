@@ -178,18 +178,23 @@ def _start_docker_services() -> bool:
     console.print()
     console.print(Rule("[bold]1 · Docker Services (Build + Start)[/]", style="blue"))
 
-    # Images bauen (nur wenn Dockerfile/Quellcode geändert – cached sonst)
+    # Gebaut wird immer: sind Base-Images und Layer lokal vorhanden, klappt das auch
+    # ohne Internet. Scheitert der Build (z.B. offline bei geaendertem Code), werden die
+    # zuletzt gebauten Images weiterverwendet.
+    should_use_existing_images = False
     if not _stream(
         ["docker", "compose", *_COMPOSE_FILE_ARGS, "build"],
         "Images bauen (mqtt-broker, captive-dns, frontend, server)",
     ):
-        return False
+        console.print("  [yellow]⚠ Build fehlgeschlagen (offline?) – es werden die zuletzt "
+                      "gebauten Images verwendet[/]")
+        should_use_existing_images = True
 
-    # Alle Services starten
-    if not _stream(
-        ["docker", "compose", *_COMPOSE_FILE_ARGS, "up", "-d"],
-        "Services starten",
-    ):
+    # Alle Services starten (--no-build: fehlendes Image ist ein Fehler, kein Neubau)
+    up_command = ["docker", "compose", *_COMPOSE_FILE_ARGS, "up", "-d"]
+    if should_use_existing_images:
+        up_command.append("--no-build")
+    if not _stream(up_command, "Services starten"):
         return False
 
     # Statusübersicht

@@ -150,13 +150,21 @@ def _stream(cmd: list[str], title: str) -> bool:
 
 
 def _build_and_start() -> bool:
+    # Gebaut wird immer: sind Base-Images und Layer lokal vorhanden, klappt das auch
+    # ohne Internet. Scheitert der Build (z.B. offline bei geaendertem Code), werden die
+    # zuletzt gebauten Images weiterverwendet.
+    should_use_existing_images = False
     console.print("\n  [bold dim]▸ Images bauen[/]")
     if subprocess.run(["docker", "compose", *_COMPOSE_FILE_ARGS, "build"]).returncode != 0:
-        console.print("  [red]✗ Build fehlgeschlagen[/]")
-        return False
+        console.print("  [yellow]⚠ Build fehlgeschlagen (offline?) – es werden die zuletzt "
+                      "gebauten Images verwendet[/]")
+        should_use_existing_images = True
 
     console.print("  [bold dim]▸ Services starten[/]")
-    if subprocess.run(["docker", "compose", *_COMPOSE_FILE_ARGS, "up", "-d"]).returncode != 0:
+    up_command = ["docker", "compose", *_COMPOSE_FILE_ARGS, "up", "-d"]
+    if should_use_existing_images:
+        up_command.append("--no-build")
+    if subprocess.run(up_command).returncode != 0:
         console.print("  [red]✗ Start fehlgeschlagen[/]")
         return False
 
