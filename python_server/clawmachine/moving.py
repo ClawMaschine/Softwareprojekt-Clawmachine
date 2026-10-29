@@ -140,6 +140,7 @@ class Moving:
             # Deshalb ein Stueck wegfahren und danach erneut auf den Endstop zu.
             self.__start_homing_backoff(axis)
             return True
+        self.__unreference_axis(axis)
         self.__send_axis_speed(axis, -self.motor_speed_configuration.homing_percent)
         return True
 
@@ -174,10 +175,22 @@ class Moving:
         print(
             f"[MOVING] Achse {axis} weggefahren — fahre zum Homing zurueck auf den Endstop"
         )
+        # __start_homing_backoff() hat die Achse fuer die Wegfahrt auf 0 gesetzt; diese
+        # Pseudo-Referenz muss vor der Endstop-Suche wieder weg.
+        self.__unreference_axis(axis)
         self.__send_axis_speed(axis, -self.motor_speed_configuration.homing_percent)
 
     def __endstop_reached(self, axis):
         return self.endstop_status.get(axis, 1) == 0
+
+    def __travel_limit_reached(self, axis):
+        # Obere Grenze der Achse (x/y/z_travel_steps in config.ini, 0 = unbegrenzt). Gilt nur
+        # nach dem Homing, weil die Position sonst nicht stimmt. Die Position hier ist bis zu
+        # POSITION_PUBLISH_INTERVAL_MILLISECONDS alt — genau stoppt der Motor-Controller.
+        travel_steps = self.positioning_configuration.travel_steps_by_axis[axis]
+        if travel_steps <= 0 or not self.is_referenced[axis]:
+            return False
+        return self.step_position[axis] >= travel_steps
 
     def set_max_speed_percent(self, axis, percent: int):
         # Zur Laufzeit vom Webinterface eingestellt (xy_speed:/z_speed:), gilt bis
@@ -258,6 +271,17 @@ class Moving:
             # Statt nur abzubrechen explizit 0 senden: sonst liefe die Achse mit der
             # vorigen Geschwindigkeit weiter.
             print(f"[MOVING] Bewegung der Achse {axis} blockiert — Endstop erreicht")
+            if self.commanded_speed[axis] != 0:
+                self.__stop_axis_immediately(axis)
+            return True
+        if scaled_speed > 0 and self.__travel_limit_reached(axis):
+            # Gegenstueck zum Endstop am anderen Ende der Achse. Zweite Verteidigungslinie:
+            # der Motor-Controller haelt die Achse vor jedem Schritt selbst an. Hier nur,
+            # damit der Server nicht weiter in eine gesperrte Richtung sendet.
+            travel_steps = self.positioning_configuration.travel_steps_by_axis[axis]
+            print(
+                f"[MOVING] Bewegung der Achse {axis} blockiert — Verfahrweg {travel_steps} erreicht"
+            )
             if self.commanded_speed[axis] != 0:
                 self.__stop_axis_immediately(axis)
             return True
