@@ -81,6 +81,8 @@ DNSMASQ_CONF = Path("/etc/dnsmasq.d/clawmachine-hotspot.conf")
 NM_UNMANAGED_CONF = Path("/etc/NetworkManager/conf.d/99-clawmachine-unmanaged.conf")
 WLAN_IP_SERVICE = Path("/etc/systemd/system/clawmachine-wlan-ip.service")
 # Docker erst nach IP + Hotspot starten: captive-dns bindet fest an AP_IP und beendet sich sonst
+# Fuehrt dieses Skript mit -y bei jedem Boot aus (stellt den Hotspot bei Bedarf wieder her)
+HOTSPOT_BOOT_SERVICE = Path("/etc/systemd/system/clawmachine-hotspot-boot.service")
 DOCKER_DROPIN = Path("/etc/systemd/system/docker.service.d/clawmachine-after-hotspot.conf")
 
 
@@ -375,8 +377,35 @@ def _write_docker_dropin() -> None:
     DOCKER_DROPIN.write_text(
         "[Unit]\n"
         "Wants=clawmachine-wlan-ip.service\n"
-        "After=clawmachine-wlan-ip.service hostapd.service\n"
+        "After=clawmachine-wlan-ip.service hostapd.service clawmachine-hotspot-boot.service\n"
     )
+
+
+def _write_hotspot_boot_service() -> None:
+    script_path = Path(__file__).resolve()
+    HOTSPOT_BOOT_SERVICE.write_text(
+        "[Unit]\n"
+        "Description=Clawmachine – Hotspot beim Boot pruefen/einrichten\n"
+        "After=network-pre.target\n"
+        "Wants=network-pre.target\n"
+        "Before=docker.service\n\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        f"ExecStart={sys.executable} {script_path} -y\n"
+        "RemainAfterExit=yes\n"
+        "TimeoutStartSec=300\n\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
+
+
+def _ensure_boot_integration() -> None:
+    """Boot-Dienst + Docker-Drop-in nachziehen, auch wenn der Hotspot schon laeuft."""
+    console.print("  [dim]▸[/] Boot-Integration pruefen (Hotspot-Boot-Dienst, Docker-Reihenfolge)")
+    _write_hotspot_boot_service()
+    _write_docker_dropin()
+    _run_required(["systemctl", "daemon-reload"], "systemd daemon-reload")
+    _run_required(["systemctl", "enable", "clawmachine-hotspot-boot.service"], "Aktiviere Hotspot-Boot-Dienst")
 
 
 def _patch_hostapd_default() -> None:
@@ -447,6 +476,10 @@ def _apply(iface: str, state: dict) -> None:
     _write_wlan_ip_service(iface)
     console.print("    [green]✓[/]")
 
+    console.print(f"    [dim]▸[/] Schreibe {HOTSPOT_BOOT_SERVICE}")
+    _write_hotspot_boot_service()
+    console.print("    [green]✓[/]")
+
     console.print(f"    [dim]▸[/] Schreibe {DOCKER_DROPIN}")
     _write_docker_dropin()
     console.print("    [green]✓[/]")
@@ -466,6 +499,8 @@ def _apply(iface: str, state: dict) -> None:
     _run_required(["systemctl", "enable", "--now", "dnsmasq"], "Aktiviere + starte dnsmasq")
     # Docker beim Boot starten (Container haben restart: unless-stopped, u.a. captive-dns)
     _run(["systemctl", "enable", "docker"])
+    # Nur enable (ohne --now): der Boot-Dienst ruft dieses Skript selbst auf
+    _run_required(["systemctl", "enable", "clawmachine-hotspot-boot.service"], "Aktiviere Hotspot-Boot-Dienst")
 
 
 # ─── Hauptprogramm ────────────────────────────────────────────────────────────
@@ -521,9 +556,11 @@ def main() -> None:
         console.print()
         if arguments.yes:
             console.print("  Hotspot ist bereits aktiv, keine Neukonfiguration [dim](-y: Standard)[/]")
+            _ensure_boot_integration()
             _show_final_state(iface)
             return
         if not Confirm.ask("  Hotspot ist bereits aktiv. Neu konfigurieren?", default=False):
+            _ensure_boot_integration()
             _show_final_state(iface)
             return
 
