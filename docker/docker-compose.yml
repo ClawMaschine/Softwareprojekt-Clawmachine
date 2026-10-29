@@ -21,7 +21,8 @@ services:
       context: ./captive-dns
       dockerfile: Dockerfile
     container_name: captive-dns
-    restart: unless-stopped
+    # always: startet bei jedem Boot/Docker-Start wieder, auch wenn er einmal gestoppt wurde
+    restart: always
     # host-Netzwerk: Container bindet direkt auf 192.168.0.103:53 (Hotspot-Interface)
     network_mode: host
 

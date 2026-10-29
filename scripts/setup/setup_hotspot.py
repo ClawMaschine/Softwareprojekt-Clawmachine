@@ -80,6 +80,8 @@ HOSTAPD_CONF = Path("/etc/hostapd/hostapd.conf")  # systemd-Unit prüft genau di
 DNSMASQ_CONF = Path("/etc/dnsmasq.d/clawmachine-hotspot.conf")
 NM_UNMANAGED_CONF = Path("/etc/NetworkManager/conf.d/99-clawmachine-unmanaged.conf")
 WLAN_IP_SERVICE = Path("/etc/systemd/system/clawmachine-wlan-ip.service")
+# Docker erst nach IP + Hotspot starten: captive-dns bindet fest an AP_IP und beendet sich sonst
+DOCKER_DROPIN = Path("/etc/systemd/system/docker.service.d/clawmachine-after-hotspot.conf")
 
 
 # ─── System-Hilfsfunktionen ───────────────────────────────────────────────────
@@ -368,6 +370,15 @@ def _write_wlan_ip_service(iface: str) -> None:
     )
 
 
+def _write_docker_dropin() -> None:
+    DOCKER_DROPIN.parent.mkdir(parents=True, exist_ok=True)
+    DOCKER_DROPIN.write_text(
+        "[Unit]\n"
+        "Wants=clawmachine-wlan-ip.service\n"
+        "After=clawmachine-wlan-ip.service hostapd.service\n"
+    )
+
+
 def _patch_hostapd_default() -> None:
     default_path = Path("/etc/default/hostapd")
     if not default_path.exists():
@@ -436,6 +447,10 @@ def _apply(iface: str, state: dict) -> None:
     _write_wlan_ip_service(iface)
     console.print("    [green]✓[/]")
 
+    console.print(f"    [dim]▸[/] Schreibe {DOCKER_DROPIN}")
+    _write_docker_dropin()
+    console.print("    [green]✓[/]")
+
     console.print(f"    [dim]▸[/] Passe /etc/default/hostapd an")
     _patch_hostapd_default()
     console.print("    [green]✓[/]")
@@ -449,6 +464,8 @@ def _apply(iface: str, state: dict) -> None:
     )
     _run_required(["systemctl", "enable", "--now", "hostapd"], "Aktiviere + starte hostapd")
     _run_required(["systemctl", "enable", "--now", "dnsmasq"], "Aktiviere + starte dnsmasq")
+    # Docker beim Boot starten (Container haben restart: unless-stopped, u.a. captive-dns)
+    _run(["systemctl", "enable", "docker"])
 
 
 # ─── Hauptprogramm ────────────────────────────────────────────────────────────

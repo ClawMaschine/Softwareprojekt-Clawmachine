@@ -30,6 +30,7 @@ console = Console()
 
 _SCRIPT_DIR = Path(__file__).parent
 _REPO_ROOT = _SCRIPT_DIR.parent.parent
+ALWAYS_RUNNING_SERVICE = "captive-dns"
 _COMPOSE = _REPO_ROOT / "docker" / "docker-compose.yml"
 # Lokaler, nicht eingecheckter Override (siehe docker/docker-compose.override.yml).
 # Mit explizitem -f wird er von docker compose NICHT automatisch geladen.
@@ -76,7 +77,14 @@ def main() -> None:
 
     console.print()
     console.print(Rule("[bold]Docker Services stoppen[/]", style="blue"))
-    if not _stream(["docker", "compose", *_COMPOSE_FILE_ARGS, "down"], "Services stoppen"):
+    # captive-dns bleibt immer an (DNS fuer den Hotspot) — alle anderen Services stoppen
+    # und entfernen, der DNS-Container laeuft weiter.
+    services = _run(["docker", "compose", *_COMPOSE_FILE_ARGS, "config", "--services"]).stdout.split()
+    services_to_stop = [name for name in services if name != ALWAYS_RUNNING_SERVICE]
+    if not _stream(
+        ["docker", "compose", *_COMPOSE_FILE_ARGS, "rm", "--stop", "--force", *services_to_stop],
+        "Services stoppen (captive-dns bleibt an)",
+    ):
         sys.exit(1)
 
     console.print()
