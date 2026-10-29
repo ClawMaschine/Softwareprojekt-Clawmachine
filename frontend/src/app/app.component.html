@@ -98,41 +98,6 @@
           (click)="sendClaw('close')"
         >Klaue schließen</button>
       </div>
-      <div class="position-controls">
-        @for (axis of positionAxes; track axis) {
-          <div class="accel-controls">
-            <span class="accel-label">
-              {{ axis }}: {{ positionState?.position?.[axis] ?? '–' }} Schritte
-              @if (positionState && !positionState.isReferenced[axis]) { (nicht referenziert) }
-              @if (positionState?.gotoTargets?.[axis] !== null && positionState?.gotoTargets?.[axis] !== undefined) {
-                → {{ positionState?.gotoTargets?.[axis] }}
-              }
-            </span>
-            <input
-              class="accel-input"
-              type="number"
-              min="0"
-              step="1"
-              placeholder="Ziel"
-              [attr.max]="positionState?.travelSteps?.[axis] || null"
-              [(ngModel)]="gotoTargetInputs[axis]"
-              [disabled]="connectionStatus !== 'connected'"
-            />
-          </div>
-        }
-        <div class="claw-controls">
-          <button
-            class="btn btn-claw"
-            [disabled]="connectionStatus !== 'connected'"
-            (click)="sendGoto()"
-          >Zu Position fahren</button>
-          <button
-            class="btn btn-claw"
-            [disabled]="connectionStatus !== 'connected'"
-            (click)="cancelGoto()"
-          >Abbrechen</button>
-        </div>
-      </div>
       <div class="accel-controls">
         <label class="accel-label" for="claw-angle-slider">Klaue Position</label>
         <input

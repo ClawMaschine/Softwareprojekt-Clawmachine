@@ -154,6 +154,11 @@ export class AppComponent implements OnInit, OnDestroy {
     this.mqttService.publishCommand('front:0');
   }
 
+  gotoStart():void 
+  {
+    this.mqttService.publishCommand(`goto:2200,100,1500`);
+  }
+
   // "goto:<x>,<y>,<z>" — leere Felder lassen die Achse stehen.
   sendGoto(): void {
     const fields = this.positionAxes.map(axis => {
