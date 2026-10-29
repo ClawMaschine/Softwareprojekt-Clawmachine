@@ -31,13 +31,29 @@ public:
   void resetStepPosition(long newStepPosition);
   // Faehrt mit der angegebenen Geschwindigkeit (Betrag in %, Richtung ergibt sich aus
   // Ziel - aktuelle Position) bis zur Zielposition und haelt dort sofort an. Jeder
-  // setSpeed()/stopImmediately()-Aufruf bricht die Zielfahrt ab.
+  // setSpeed()/stopImmediately()-Aufruf bricht die Zielfahrt ab. Ein Ziel ausserhalb
+  // des mit setStepPositionLimits() gesetzten Fensters wird auf dessen Rand begrenzt.
   void moveToStepPosition(long targetStepPositionValue, int speedPercent);
+
+  // Begrenzt die Schrittposition auf [minStepPosition, maxStepPosition]. Der Motor fuehrt
+  // keinen Schritt aus, der aus dem Fenster herausfuehren wuerde — geprueft wird vor jedem
+  // einzelnen Schritt und nicht nur bei jedem Fahrbefehl. Damit kann weder ein wiederholter
+  // setSpeed()-Aufruf noch eine noch auslaufende Bremsrampe die Grenze ueberfahren.
+  // Die Grenzen gelten in der Zaehlrichtung dieses Motors (getStepPosition()).
+  void setStepPositionLimits(long minStepPosition, long maxStepPosition);
+  void clearStepPositionLimits();
+  // true, wenn der Motor seit dem letzten Aufruf an einer Grenze angehalten wurde. Der Aufruf
+  // setzt die Meldung zurueck: ein Ereignis wird so nur einmal gemeldet. Abfragen statt direkt
+  // protokollieren, weil update() pro Sekunde sehr oft laeuft und kein Serial enthalten darf.
+  bool consumeStepPositionLimitHit();
+
   void update();
 
 private:
   void applySpeed(float speedPercent);
   void updateRamp();
+  // true, solange der naechste Schritt in Fahrtrichtung das Fenster verlassen wuerde.
+  bool isBlockedByStepPositionLimit() const;
   Adafruit_MotorShield &motorShield;
   uint8_t stepperPort;
   uint16_t maxRevolutionsPerMinute;
@@ -48,6 +64,15 @@ private:
   long stepPosition = 0;
   bool hasTargetStepPosition = false;
   long targetStepPosition = 0;
+
+  // Erlaubtes Positionsfenster (siehe setStepPositionLimits()). Ohne gesetzte Grenzen
+  // faehrt der Motor unbegrenzt weiter, wie vor dieser Erweiterung.
+  bool hasStepPositionLimits = false;
+  long minStepPosition       = 0;
+  long maxStepPosition       = 0;
+  // Gemerkt bis zum Abholen durch consumeStepPositionLimitHit(): der Stopp an der Grenze
+  // setzt die Geschwindigkeit auf 0 und ist danach von aussen nicht mehr zu erkennen.
+  bool hasHitStepPositionLimit = false;
 
   // Float statt int: update()/updateRamp() kann sehr oft pro Sekunde
   // aufgerufen werden (loop() hat kein delay() mehr, siehe main.cpp), da

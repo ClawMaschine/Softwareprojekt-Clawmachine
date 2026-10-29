@@ -53,6 +53,12 @@ void ClawStepperMotor::resetStepPosition(long newStepPosition)
 
 void ClawStepperMotor::moveToStepPosition(long targetStepPositionValue, int speedPercent)
 {
+  if (hasStepPositionLimits) {
+    // Sonst bliebe die Zielfahrt mit gesetztem hasTargetStepPosition stehen, sobald der
+    // Schritt-Check an der Grenze bremst, und das Ziel wuerde nie als erreicht gemeldet.
+    targetStepPositionValue = constrain(targetStepPositionValue, minStepPosition, maxStepPosition);
+  }
+
   const long stepsToGo = targetStepPositionValue - stepPosition;
   if (stepsToGo == 0) {
     stopImmediately();
@@ -64,6 +70,37 @@ void ClawStepperMotor::moveToStepPosition(long targetStepPositionValue, int spee
   // Nach setSpeed(), das die Zielfahrt sonst gleich wieder verwirft.
   hasTargetStepPosition = true;
   targetStepPosition    = targetStepPositionValue;
+}
+
+void ClawStepperMotor::setStepPositionLimits(long newMinStepPosition, long newMaxStepPosition)
+{
+  hasStepPositionLimits = true;
+  minStepPosition       = min(newMinStepPosition, newMaxStepPosition);
+  maxStepPosition       = max(newMinStepPosition, newMaxStepPosition);
+}
+
+void ClawStepperMotor::clearStepPositionLimits()
+{
+  hasStepPositionLimits = false;
+}
+
+bool ClawStepperMotor::consumeStepPositionLimitHit()
+{
+  const bool hasHit         = hasHitStepPositionLimit;
+  hasHitStepPositionLimit   = false;
+  return hasHit;
+}
+
+bool ClawStepperMotor::isBlockedByStepPositionLimit() const
+{
+  // Entscheidend ist die tatsaechliche Geschwindigkeit und nicht targetSpeedPercent: beim
+  // Loslassen der Taste sendet der Server 0, der Motor laeuft aber noch die Bremsrampe
+  // herunter und faehrt dabei weiter.
+  if (!hasStepPositionLimits || currentSpeedPercent == 0) {
+    return false;
+  }
+  const long nextStepPosition = stepPosition + (currentSpeedPercent > 0 ? 1 : -1);
+  return nextStepPosition > maxStepPosition || nextStepPosition < minStepPosition;
 }
 
 void ClawStepperMotor::setAcceleration(float percentPerSecond)
@@ -123,6 +160,14 @@ void ClawStepperMotor::update()
   }
 
   updateRamp();
+
+  // Vor jedem einzelnen Schritt pruefen, nicht nur bei jedem Fahrbefehl: so kann weder eine
+  // auslaufende Bremsrampe noch ein wiederholter Fahrbefehl das Fenster verlassen. Der Stopp
+  // setzt die Geschwindigkeit auf 0, der Motor laeuft damit gleich in den release()-Zweig.
+  if (isBlockedByStepPositionLimit()) {
+    stopImmediately();
+    hasHitStepPositionLimit = true;
+  }
 
   if (stepIntervalMicroseconds == 0) {
     // Motor steht still (Rampe ist bei 0% angekommen) -> Spulen stromlos

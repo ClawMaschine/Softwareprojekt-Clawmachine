@@ -30,6 +30,10 @@ public:
   long getPosition(char axis) const;
   // Setzt die aktuelle Stellung der Achse als Position 0 (Referenzieren am Endstop).
   bool zeroPosition(char axis);
+  // Nimmt die Referenz einer Achse zurueck: die gezaehlte Position gilt nicht mehr und die
+  // Verfahrgrenzen werden aufgehoben. Notwendig vor dem Homing — sonst wuerde der Controller
+  // die Achse an der alten unteren Grenze anhalten, bevor der Endstop ausloest.
+  bool clearPositionReference(char axis);
   // Faehrt eine Achse mit speedPercent (Betrag) zur Position in Schritten und haelt dort an.
   bool moveToPosition(char axis, long steps, int speedPercent);
   // Verfahrweg einer Achse in Schritten (0 = unbegrenzt). Gilt erst, wenn die Achse
@@ -54,13 +58,20 @@ public:
 
 private:
   static int axisIndex(char axis);
-  // Richtung der Zielgeschwindigkeit einer Achse im Koordinatensystem des Servers (-1, 0, +1).
-  int getTargetDirection(char axis) const;
-  void enforceTravelLimits();
+  // Uebertraegt Verfahrweg und Referenzstatus einer Achse als Positionsfenster auf ihre
+  // Motoren. Ab dort setzt der Schrittmotor die Grenze selbst durch — vor jedem Schritt.
+  void applyTravelLimits(char axis);
+  // true, wenn ein Motor der Achse seit dem letzten Aufruf an seiner Verfahrgrenze
+  // angehalten wurde (holt die Meldung bei den Motoren ab und setzt sie zurueck).
+  bool consumeTravelLimitHit(char axis);
+  // Haelt die ganze Achse an, sobald einer ihrer Motoren an der Verfahrgrenze angehalten hat
+  // (X hat zwei Motoren — laeuft einer weiter, arbeiten beide gegeneinander), und meldet das
+  // einmalig je Ereignis. Nicht in jedem update()-Durchlauf protokollieren: jede serielle
+  // Ausgabe blockiert bei 115200 Baud einige Millisekunden und damit die Schritte der Motoren.
+  void handleTravelLimitHits();
 
   long travelStepsByAxis[3] = {0, 0, 0};
   bool isAxisReferenced[3]  = {false, false, false};
-
 
   static ClawMotorController *instance;
   ClawMqttConnection &connection;

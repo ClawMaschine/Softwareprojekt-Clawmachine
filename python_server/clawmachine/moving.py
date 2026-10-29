@@ -96,6 +96,14 @@ class Moving:
         self.step_position[axis] = 0
         self.is_referenced[axis] = True
 
+    def __unreference_axis(self, axis):
+        # Waehrend der Endstop-Suche darf die alte Verfahrgrenze des Motor-Controllers nicht
+        # greifen: sonst haelt er die Achse an der unteren Grenze an, bevor der Endstop
+        # ausloest, und sie wird nie wieder referenziert. Der Motor-Controller nimmt die
+        # Referenz nur auf diesen Befehl hin zurueck (sonst erst beim Neustart).
+        self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, f"unreference:{axis}")
+        self.is_referenced[axis] = False
+
     def __finish_homing(self, axis):
         self.homing_in_progress[axis] = False
         self.__stop_axis_immediately(axis)

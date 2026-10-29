@@ -261,6 +261,14 @@ void applyMotorCommand(const char *topic, const String &message)
     if (axisText.length() != 1 || !movementController.zeroPosition(axisText.charAt(0))) {
       publishErrorLog(topic, message, "Unbekannte Achse beim Nullsetzen");
     }
+  } else if (message.startsWith("unreference:")) {
+    // "unreference:X" - Position der Achse gilt nicht mehr, Verfahrgrenzen aus. Der Server
+    // sendet das vor dem Homing: sonst stoppt die Achse an der alten unteren Grenze, bevor
+    // der Endstop ausloest, und wird nie wieder referenziert.
+    const String axisText = message.substring(12);
+    if (axisText.length() != 1 || !movementController.clearPositionReference(axisText.charAt(0))) {
+      publishErrorLog(topic, message, "Unbekannte Achse beim Aufheben der Referenz");
+    }
   } else if (message.startsWith("goto:")) {
     // "goto:X:1200:50" - Achse X mit 50 % Geschwindigkeit zu Position 1200 (Schritte) fahren
     char axis = 0;

@@ -7,6 +7,19 @@ ClawMotorController *ClawMotorController::instance = nullptr;
 // Endstop sicher ausloest — deshalb stoppt der ESP erst ein Stueck dahinter.
 static constexpr long LOWER_LIMIT_OVERRUN_STEPS = 100;
 
+// Verfahrweg 0 heisst "unbegrenzt". Als Zahl ausgedrueckt: weit jenseits jedes realen
+// Verfahrwegs, aber klein genug, dass die Spiegelung fuer die gegensinnig zaehlenden
+// Motoren nicht ueberlaeuft (LONG_MAX waere bei -1 * ein Ueberlauf).
+static constexpr long UNLIMITED_TRAVEL_STEPS = 1000000000L;
+
+// Rechnet ein Fenster aus Server-Koordinaten (0 = Endstop, positiv = vom Endstop weg) in die
+// Zaehlrichtung eines Motors um. motorPositionSign: +1 = zaehlt wie der Server, -1 = gegensinnig.
+static void applyMotorStepPositionLimits(
+    ClawStepperMotor &motor, int motorPositionSign, long lowerLimit, long upperLimit)
+{
+  motor.setStepPositionLimits(motorPositionSign * lowerLimit, motorPositionSign * upperLimit);
+}
+
 ClawMotorController::ClawMotorController(
     ClawMqttConnection &connection,
     uint8_t motorShieldAI2cAddress,
@@ -53,14 +66,16 @@ void ClawMotorController::begin()
 
 void ClawMotorController::update()
 {
-  enforceTravelLimits();
   xMotorLeft.update();
   yMotor.update();
   xMotorRight.update();
   zMotor.update();
   clawServo.update();
+  // Die Verfahrgrenze setzt jeder Motor selbst durch, vor jedem Schritt (Positionsfenster,
+  // siehe applyTravelLimits()). Hier wird nur noch nachgezogen, was den ganzen Achsverbund
+  // betrifft: die uebrigen Motoren der Achse anhalten und das Ereignis melden.
+  handleTravelLimitHits();
 }
-
 
 bool ClawMotorController::move(char axis, int speed)
 {
@@ -171,7 +186,21 @@ bool ClawMotorController::zeroPosition(char axis)
       return false;
   }
   isAxisReferenced[axisIndex(axis)] = true;
+  applyTravelLimits(axis);
   Serial.printf("[MOTOR] %c: Position auf 0 gesetzt\n", axis);
+  return true;
+}
+
+bool ClawMotorController::clearPositionReference(char axis)
+{
+  const int index = axisIndex(axis);
+  if (index < 0) {
+    Serial.printf("[MOTOR] Unbekannte Achse: %c\n", axis);
+    return false;
+  }
+  isAxisReferenced[index] = false;
+  applyTravelLimits(axis);
+  Serial.printf("[MOTOR] %c: Referenz aufgehoben, Verfahrgrenzen inaktiv\n", axis);
   return true;
 }
 
@@ -263,40 +292,74 @@ bool ClawMotorController::setTravelSteps(char axis, long travelSteps)
     return false;
   }
   travelStepsByAxis[index] = max(travelSteps, 0L);
+  applyTravelLimits(axis);
   Serial.printf("[MOTOR] %c: Verfahrweg %ld Schritte (0 = unbegrenzt)\n", axis, travelStepsByAxis[index]);
   return true;
 }
 
-// Vorzeichen wie in move()/getPosition(): X rechts +1, Y und Z gespiegelt.
-int ClawMotorController::getTargetDirection(char axis) const
+// Vorzeichen wie in move()/getPosition(): der rechte X-Motor zaehlt wie der Server,
+// der linke X-Motor sowie Y und Z gegensinnig.
+void ClawMotorController::applyTravelLimits(char axis)
 {
-  int targetSpeedPercent = 0;
-  switch (axis) {
-    case 'X': targetSpeedPercent = xMotorRight.getTargetSpeedPercent(); break;
-    case 'Y': targetSpeedPercent = -yMotor.getTargetSpeedPercent(); break;
-    case 'Z': targetSpeedPercent = -zMotor.getTargetSpeedPercent(); break;
+  const int index = axisIndex(axis);
+  if (index < 0) {
+    return;
   }
-  return (targetSpeedPercent > 0) - (targetSpeedPercent < 0);
+
+  if (!isAxisReferenced[index]) {
+    // Ohne Referenz ist die gezaehlte Position willkuerlich (der Zaehler startet beim Boot
+    // bei 0, egal wo die Achse steht) — eine Grenze laege dann an einer zufaelligen Stelle.
+    switch (axis) {
+      case 'X':
+        xMotorRight.clearStepPositionLimits();
+        xMotorLeft.clearStepPositionLimits();
+        break;
+      case 'Y': yMotor.clearStepPositionLimits(); break;
+      case 'Z': zMotor.clearStepPositionLimits(); break;
+    }
+    return;
+  }
+
+  const long travelSteps = travelStepsByAxis[index];
+  const long lowerLimit  = -LOWER_LIMIT_OVERRUN_STEPS;
+  const long upperLimit  = travelSteps > 0 ? travelSteps : UNLIMITED_TRAVEL_STEPS;
+
+  switch (axis) {
+    case 'X':
+      applyMotorStepPositionLimits(xMotorRight, 1, lowerLimit, upperLimit);
+      applyMotorStepPositionLimits(xMotorLeft, -1, lowerLimit, upperLimit);
+      break;
+    case 'Y': applyMotorStepPositionLimits(yMotor, -1, lowerLimit, upperLimit); break;
+    case 'Z': applyMotorStepPositionLimits(zMotor, -1, lowerLimit, upperLimit); break;
+  }
 }
 
-void ClawMotorController::enforceTravelLimits()
+bool ClawMotorController::consumeTravelLimitHit(char axis)
+{
+  switch (axis) {
+    case 'X': {
+      // Beide Motoren abfragen (kein ||, das wuerde den zweiten ueberspringen und seine
+      // Meldung bis zum naechsten Durchlauf stehen lassen).
+      const bool hasRightHit = xMotorRight.consumeStepPositionLimitHit();
+      const bool hasLeftHit  = xMotorLeft.consumeStepPositionLimitHit();
+      return hasRightHit || hasLeftHit;
+    }
+    case 'Y': return yMotor.consumeStepPositionLimitHit();
+    case 'Z': return zMotor.consumeStepPositionLimitHit();
+    default:  return false;
+  }
+}
+
+void ClawMotorController::handleTravelLimitHits()
 {
   const char axisNames[] = {'X', 'Y', 'Z'};
   for (char axis : axisNames) {
-    const int index = axisIndex(axis);
-    if (!isAxisReferenced[index]) {
+    if (!consumeTravelLimitHit(axis)) {
       continue;
     }
-
-    const int direction = getTargetDirection(axis);
-    const long position = getPosition(axis);
-    const long travelSteps = travelStepsByAxis[index];
-    const bool isBelowLowerLimit = direction < 0 && position <= -LOWER_LIMIT_OVERRUN_STEPS;
-    const bool isAboveUpperLimit = direction > 0 && travelSteps > 0 && position >= travelSteps;
-    if (isBelowLowerLimit || isAboveUpperLimit) {
-      Serial.printf("[MOTOR] %c: Verfahrgrenze erreicht (Position %ld, Verfahrweg %ld)\n", axis, position, travelSteps);
-      stopAxisImmediately(axis);
-    }
+    stopAxisImmediately(axis);
+    Serial.printf("[MOTOR] %c: Verfahrgrenze erreicht (Position %ld, Verfahrweg %ld)\n",
+                  axis, getPosition(axis), travelStepsByAxis[axisIndex(axis)]);
   }
 }
 
