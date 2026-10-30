@@ -569,10 +569,19 @@ class ClawMachine:
                     # Beschleunigung in %/s. "accel" gilt fuer alle Achsen (aelterer Befehl),
                     # xy_accel/z_accel getrennt. Die Werte werden am Server gehalten, damit
                     # sie nach einem Neustart des Motor-Controllers erneut gesendet werden.
-                    # Vorerst fest auf 500 (siehe HARDCODED_ACCELERATION_PERCENT_PER_SECOND
-                    # in configuration_loader.py): der Befehl wird ignoriert, das
-                    # Webinterface bekommt den festen Wert zurueck.
-                    print(f"Beschleunigung ist fest eingestellt, ignoriere: {payload_text}")
+                    # Startwert ist HARDCODED_ACCELERATION_PERCENT_PER_SECOND
+                    # (configuration_loader.py), das Webinterface kann ihn zur Laufzeit aendern.
+                    try:
+                        acceleration_percent_per_second = int(float(value))
+                    except ValueError:
+                        print(f"Invalid acceleration value: {payload_text}")
+                        return
+                    axes = {"accel": ("X", "Z"), "xy_accel": ("X",), "z_accel": ("Z",)}[name]
+                    for axis in axes:
+                        self.move_controller.set_acceleration(
+                            axis, acceleration_percent_per_second
+                        )
+                    self.publish_motor_settings()
                     self.publish_speed_settings()
                 elif name == "goto":
                     self.go_to_from_command(value)
