@@ -432,3 +432,34 @@
   color: var(--text-main);
   word-break: break-all;
 }
+
+/* ── Movement-Einstellungen ── */
+
+.settings-table {
+  border-collapse: collapse;
+  background: var(--bg-card-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-width: 320px;
+}
+
+.settings-table td {
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.settings-key {
+  color: var(--text-muted);
+}
+
+.settings-value {
+  color: var(--text-main);
+  text-align: right;
+}
+
+.settings-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+}

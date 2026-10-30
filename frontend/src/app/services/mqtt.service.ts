@@ -44,6 +44,8 @@ export interface SpeedSettings {
   clawDegreesPerSecond: number;
   xyAccelerationPercentPerSecond: number;
   zAccelerationPercentPerSecond: number;
+  // Alle Werte des Movement-Controllers (Schluessel wie in config.ini)
+  movementSettings?: Record<string, number>;
 }
 
 // Position in Schritten (0 = Endstop), vom Server gepusht (siehe publish_position() in

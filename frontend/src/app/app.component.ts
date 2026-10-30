@@ -53,6 +53,9 @@ export class AppComponent implements OnInit, OnDestroy {
   xyAccelerationPercentPerSecond = 50;
   zAccelerationPercentPerSecond = 50;
 
+  // Alle aktuell am Server wirksamen Werte des Movement-Controllers, als Liste fuer die Anzeige.
+  movementSettingsList: { key: string; value: number }[] = [];
+
   // Gleicher Default wie DEFAULT_SPEED_DEGREES_PER_SECOND in claw_servo_motor.h —
   // Fahrgeschwindigkeit der Klaue in Grad pro Sekunde.
   clawSpeedDegreesPerSecond = 35;
@@ -86,6 +89,9 @@ export class AppComponent implements OnInit, OnDestroy {
           this.clawSpeedDegreesPerSecond = settings.clawDegreesPerSecond;
           this.xyAccelerationPercentPerSecond = settings.xyAccelerationPercentPerSecond;
           this.zAccelerationPercentPerSecond = settings.zAccelerationPercentPerSecond;
+          this.movementSettingsList = Object.entries(settings.movementSettings ?? {}).map(
+            ([key, value]) => ({ key, value }),
+          );
         }
       }),
       // Trigger change detection every second to refresh uptime displays

@@ -1,5 +1,5 @@
 import math
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 try:
     from python_server.clawmachine.topics import MOTOR_CONTROLLER_COMMAND_TOPIC
@@ -191,6 +191,15 @@ class Moving:
         if travel_steps <= 0 or not self.is_referenced[axis]:
             return False
         return self.step_position[axis] >= travel_steps
+
+    def all_settings(self) -> dict:
+        # Alle aktuell wirksamen Werte des Movement-Controllers (Anzeige im Webinterface).
+        # Schluessel entsprechen den Namen in config.ini ([motor_speed], [positioning]).
+        settings = dict(asdict(self.motor_speed_configuration))
+        settings["goto_percent"] = self.positioning_configuration.goto_percent
+        for axis, travel_steps in self.positioning_configuration.travel_steps_by_axis.items():
+            settings[f"{axis.lower()}_travel_steps"] = travel_steps
+        return settings
 
     def set_max_speed_percent(self, axis, percent: int):
         # Zur Laufzeit vom Webinterface eingestellt (xy_speed:/z_speed:), gilt bis

@@ -250,6 +250,18 @@
     </div>
   </section>
 
+  <!-- Aktuelle Einstellungen des Movement-Controllers im Python-Server -->
+  <section class="section">
+    <h2 class="section-title">Movement-Einstellungen <span class="topic-badge">clawmachine/web_interface/speed_settings</span></h2>
+    <table class="settings-table" *ngIf="movementSettingsList.length > 0; else noSettings">
+      <tr *ngFor="let setting of movementSettingsList">
+        <td class="settings-key">{{ setting.key }}</td>
+        <td class="settings-value">{{ setting.value }}</td>
+      </tr>
+    </table>
+    <ng-template #noSettings><p class="settings-empty">Noch keine Werte vom Server empfangen.</p></ng-template>
+  </section>
+
   <!-- Eingabequellen -->
   <section class="section">
     <h2 class="section-title">Eingabequellen <span class="topic-badge">clawmachine/web_interface/input_sources</span></h2>

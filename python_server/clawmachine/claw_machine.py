@@ -293,6 +293,10 @@ class ClawMachine:
                     "zAccelerationPercentPerSecond": self.move_controller.acceleration_percent_per_second(
                         "Z"
                     ),
+                    "movementSettings": {
+                        **self.move_controller.all_settings(),
+                        "claw_speed_degrees_per_second": self.claw_speed_degrees_per_second,
+                    },
                 }
             ),
         )
