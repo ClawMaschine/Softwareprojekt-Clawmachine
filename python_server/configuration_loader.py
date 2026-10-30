@@ -2,6 +2,9 @@ from configparser import ConfigParser
 from dataclasses import dataclass
 from pathlib import Path
 
+# Beschleunigung der Achsen in %/s, vorerst fest statt aus config.ini oder Webinterface.
+HARDCODED_ACCELERATION_PERCENT_PER_SECOND = 500
+
 
 @dataclass(frozen=True)
 class MqttConfiguration:
@@ -108,8 +111,9 @@ def load_motor_speed_configuration() -> MotorSpeedConfiguration:
 
     xy_percent = config_parser.getint("motor_speed", "xy_percent", fallback=100)
     z_percent = config_parser.getint("motor_speed", "z_percent", fallback=100)
-    xy_acceleration = config_parser.getint("motor_speed", "xy_accel", fallback=100)
-    z_acceleration = config_parser.getint("motor_speed", "z_accel", fallback=100)
+    # Vorerst fest (Praesentation): xy_accel / z_accel aus config.ini werden ignoriert.
+    xy_acceleration = HARDCODED_ACCELERATION_PERCENT_PER_SECOND
+    z_acceleration = HARDCODED_ACCELERATION_PERCENT_PER_SECOND
     claw_degrees_per_second = config_parser.getfloat(
         "motor_speed", "claw_degrees_per_second", fallback=35.0
     )

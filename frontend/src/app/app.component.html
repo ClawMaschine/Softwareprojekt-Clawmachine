@@ -83,6 +83,11 @@
       </div>
       <div class="claw-controls">
         <button
+          class="btn btn-stop"
+          [disabled]="connectionStatus !== 'connected'"
+          (click)="stopAllImmediately()"
+        >Alle Achsen sofort stoppen</button>
+        <button
           class="btn btn-claw"
           [disabled]="connectionStatus !== 'connected'"
           (click)="startHoming()"

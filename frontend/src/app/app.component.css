@@ -277,6 +277,19 @@
   min-width: 160px;
 }
 
+.btn-stop {
+  background: #c62828;
+  color: #fff;
+  border: 1px solid #8e0000;
+  min-width: 160px;
+  font-weight: 700;
+}
+
+.btn-stop:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .btn-claw:disabled {
   opacity: 0.4;
   cursor: not-allowed;

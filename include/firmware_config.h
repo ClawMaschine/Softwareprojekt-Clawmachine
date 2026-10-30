@@ -146,7 +146,7 @@
 // z.B. von Stillstand auf volle Geschwindigkeit in 0.5s. An tatsächliche
 // Mechanik/Gewicht der Klaue anpassen.
 #ifndef CLAW_MOTOR_ACCELERATION_PERCENT_PER_SECOND
-#define CLAW_MOTOR_ACCELERATION_PERCENT_PER_SECOND 50
+#define CLAW_MOTOR_ACCELERATION_PERCENT_PER_SECOND 500
 #endif
 #ifndef CLAW_CLAW_SERVO_PIN
 #define CLAW_CLAW_SERVO_PIN 17

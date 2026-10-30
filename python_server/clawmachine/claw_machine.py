@@ -565,21 +565,21 @@ class ClawMachine:
                     # Beschleunigung in %/s. "accel" gilt fuer alle Achsen (aelterer Befehl),
                     # xy_accel/z_accel getrennt. Die Werte werden am Server gehalten, damit
                     # sie nach einem Neustart des Motor-Controllers erneut gesendet werden.
-                    try:
-                        acceleration = int(float(value))
-                    except ValueError:
-                        print(f"Invalid acceleration value: {value}")
-                        return
-                    if name in ("accel", "xy_accel"):
-                        self.move_controller.set_acceleration("X", acceleration)
-                    if name in ("accel", "z_accel"):
-                        self.move_controller.set_acceleration("Z", acceleration)
-                    self.publish_motor_settings()
+                    # Vorerst fest auf 500 (siehe HARDCODED_ACCELERATION_PERCENT_PER_SECOND
+                    # in configuration_loader.py): der Befehl wird ignoriert, das
+                    # Webinterface bekommt den festen Wert zurueck.
+                    print(f"Beschleunigung ist fest eingestellt, ignoriere: {payload_text}")
                     self.publish_speed_settings()
                 elif name == "goto":
                     self.go_to_from_command(value)
                 elif name == "goto_cancel":
                     self.move_controller.cancel_goto()
+                    self.publish_position()
+                elif name == "stop_all":
+                    # Not-Halt: alle Achsen und die Klaue sofort anhalten
+                    self.move_controller.stop_all_immediately()
+                    self.claw_jog_state = "stop"
+                    self.mqtt_client.publish(MOTOR_CONTROLLER_COMMAND_TOPIC, "claw:stop")
                     self.publish_position()
                 elif name == "home":
                     # Referenzfahrt aller Achsen (X, Y, Z nacheinander) neu starten

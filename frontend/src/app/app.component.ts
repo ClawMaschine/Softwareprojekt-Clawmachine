@@ -176,6 +176,11 @@ export class AppComponent implements OnInit, OnDestroy {
     this.mqttService.publishCommand('goto_cancel');
   }
 
+  // Not-Halt: der Server hält alle Achsen und die Klaue sofort an und verwirft Zielfahrt und Homing.
+  stopAllImmediately(): void {
+    this.mqttService.publishCommand('stop_all');
+  }
+
   startHoming(): void {
     this.mqttService.publishCommand('home');
   }

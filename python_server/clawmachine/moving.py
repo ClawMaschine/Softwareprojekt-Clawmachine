@@ -363,6 +363,16 @@ class Moving:
             )
         return True
 
+    def stop_all_immediately(self):
+        # Not-Halt vom Webinterface: alle Achsen ohne Rampe anhalten und jede laufende
+        # Zielfahrt bzw. jedes Homing verwerfen. "stop:<Achse>" geht auch dann raus, wenn der
+        # Server die Achse schon fuer stehend haelt — der Motor-Controller laeuft vielleicht noch.
+        for axis in self.step_position:
+            self.homing_in_progress[axis] = False
+            self.homing_backing_off[axis] = False
+            self.goto_target[axis] = None
+            self.__stop_axis_immediately(axis)
+
     def cancel_goto(self):
         for axis, target in self.goto_target.items():
             if target is not None and not self.homing_backing_off[axis]:

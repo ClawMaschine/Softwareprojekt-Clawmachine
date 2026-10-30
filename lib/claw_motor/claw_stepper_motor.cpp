@@ -99,8 +99,12 @@ bool ClawStepperMotor::isBlockedByStepPositionLimit() const
   if (!hasStepPositionLimits || currentSpeedPercent == 0) {
     return false;
   }
-  const long nextStepPosition = stepPosition + (currentSpeedPercent > 0 ? 1 : -1);
-  return nextStepPosition > maxStepPosition || nextStepPosition < minStepPosition;
+  // Nur Schritte nach aussen sperren: steht der Motor schon ausserhalb des Fensters (z.B.
+  // weil der Verfahrweg im Betrieb verkleinert wurde), muss er zurueck hinein fahren koennen.
+  const bool isMovingForward = currentSpeedPercent > 0;
+  const long nextStepPosition = stepPosition + (isMovingForward ? 1 : -1);
+  return isMovingForward ? nextStepPosition > maxStepPosition
+                         : nextStepPosition < minStepPosition;
 }
 
 void ClawStepperMotor::setAcceleration(float percentPerSecond)
