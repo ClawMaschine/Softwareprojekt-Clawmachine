@@ -275,6 +275,31 @@ bool ClawMotorController::moveClaw(const char *command)
   return true;
 }
 
+void ClawMotorController::printSettings()
+{
+  struct AxisSettingsRow {
+    char axis;
+    ClawStepperMotor *motor;
+  };
+  // Beim X-Antrieb genuegt der linke Motor: beide bekommen dieselben Einstellungen.
+  const AxisSettingsRow rows[] = {{'X', &xMotorLeft}, {'Y', &yMotor}, {'Z', &zMotor}};
+
+  Serial.println("[SETTINGS] ---- Motor-Einstellungen ----");
+  for (const AxisSettingsRow &row : rows) {
+    const int index = axisIndex(row.axis);
+    Serial.printf(
+        "[SETTINGS] %c: Beschleunigung %.1f %%/s | Max. Drehzahl %u RPM | Verfahrweg %ld (0 = unbegrenzt) | referenziert %s | Position %ld | Ziel-Speed %d %%\n",
+        row.axis,
+        row.motor->getAcceleration(),
+        row.motor->getMaxRevolutionsPerMinute(),
+        travelStepsByAxis[index],
+        isAxisReferenced[index] ? "ja" : "nein",
+        getPosition(row.axis),
+        row.motor->getTargetSpeedPercent());
+  }
+  Serial.println("[SETTINGS] ------------------------------");
+}
+
 int ClawMotorController::axisIndex(char axis)
 {
   switch (axis) {

@@ -102,6 +102,7 @@ void setup()
   Serial.printf("[MOTOR_CONTROLLER] Acceleration: %.1f %%/s\n", CLAW_MOTOR_ACCELERATION_PERCENT_PER_SECOND);
   Serial.printf("[MOTOR_CONTROLLER] Claw Servo Pin: %d\n", CLAW_CLAW_SERVO_PIN);
   Serial.printf("[MOTOR_CONTROLLER] OTA Allowed Host: %s\n", CLAW_MQTT_BROKER_HOST);
+  Serial.println("[MOTOR_CONTROLLER] Serial-Menue: 's' = Motor-Einstellungen anzeigen");
   Serial.println("[MOTOR_CONTROLLER] MQTT client starts");
   Serial.print("[MOTOR_CONTROLLER] Client ID: ");
   Serial.println(CLAW_MOTOR_CONTROLLER_CLIENT_ID);
@@ -174,8 +175,21 @@ void requestHomingOnceConnected()
   hasRequestedHoming = true;
 }
 
+// Kleines Menue ueber den Serial Monitor: 's' gibt die Motor-Einstellungen aus. Nur lesen,
+// wenn Zeichen anliegen — loop() darf die Schritte der Motoren nicht aufhalten.
+void handleSerialMenu()
+{
+  while (Serial.available() > 0) {
+    const char receivedCharacter = Serial.read();
+    if (receivedCharacter == 's' || receivedCharacter == 'S') {
+      movementController.printSettings();
+    }
+  }
+}
+
 void loop()
 {
+  handleSerialMenu();
   motorControllerConnection.maintainConnection();
   requestHomingOnceConnected();
   stopAllAxesOnConnectionLoss();

@@ -40,6 +40,9 @@ public:
   // referenziert ist (zero:<Achse> empfangen); dann haelt der Controller die Achse selbst
   // bei 0 und beim Verfahrweg an, unabhaengig vom Server.
   bool setTravelSteps(char axis, long travelSteps);
+  // Gibt die aktuell wirksamen Einstellungen jeder Achse seriell aus (Beschleunigung,
+  // Drehzahl, Verfahrweg, Referenz, Position, Zielgeschwindigkeit).
+  void printSettings();
   // Haelt alle Achsen sofort an und bricht Zielfahrten und Klauen-Jog ab (z.B. bei MQTT-Abbruch).
   void stopAllMotion();
   // Beschleunigung in Prozentpunkten Geschwindigkeit pro Sekunde (0 = keine Rampe),
@@ -70,7 +73,7 @@ private:
   // Ausgabe blockiert bei 115200 Baud einige Millisekunden und damit die Schritte der Motoren.
   void handleTravelLimitHits();
 
-  long travelStepsByAxis[3] = {0, 0, 0};
+  long travelStepsByAxis[3] = {2300, 0, 0};
   bool isAxisReferenced[3]  = {false, false, false};
 
   static ClawMotorController *instance;

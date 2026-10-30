@@ -272,7 +272,9 @@ class ClawMachine:
                 f"Motor controller device '{MOTOR_CONTROLLER_DEVICE_NAME}' not registered yet. Cannot publish motor settings."
             )
             return
-        self.mqtt_client.publish(MOTOR_CONTROLLER_SETTINGS_TOPIC, payload)
+        # Retained: der Motor-Controller meldet sich "online", bevor er seine Topics
+        # abonniert hat — eine einmalige Nachricht ginge sonst gelegentlich verloren.
+        self.mqtt_client.publish(MOTOR_CONTROLLER_SETTINGS_TOPIC, payload, retain=True)
         print(
             f"Published motor settings to {MOTOR_CONTROLLER_SETTINGS_TOPIC}: {payload}"
         )

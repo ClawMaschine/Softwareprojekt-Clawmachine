@@ -26,6 +26,8 @@ public:
   // Es gibt keine Rueckmeldung vom Motor: verlorene Schritte fallen nicht auf, die Position
   // stimmt nur bis zum naechsten Referenzieren (resetStepPosition am Endstop).
   long getStepPosition() const;
+  float getAcceleration() const;
+  uint16_t getMaxRevolutionsPerMinute() const;
   // Zuletzt vorgegebene Zielgeschwindigkeit in % mit Vorzeichen (unabhaengig von der Rampe).
   int getTargetSpeedPercent() const;
   void resetStepPosition(long newStepPosition);

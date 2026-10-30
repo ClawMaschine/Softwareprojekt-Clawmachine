@@ -37,6 +37,16 @@ long ClawStepperMotor::getStepPosition() const
   return stepPosition;
 }
 
+float ClawStepperMotor::getAcceleration() const
+{
+  return accelerationPercentPerSecond;
+}
+
+uint16_t ClawStepperMotor::getMaxRevolutionsPerMinute() const
+{
+  return maxRevolutionsPerMinute;
+}
+
 int ClawStepperMotor::getTargetSpeedPercent() const
 {
   return targetSpeedPercent;

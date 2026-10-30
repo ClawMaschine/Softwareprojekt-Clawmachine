@@ -65,11 +65,11 @@ class MQTTClient:
             self.subscribed_topics.append(topic)
         self.client.subscribe(topic)
 
-    def publish(self, topic, msg):
+    def publish(self, topic, msg, retain=False):
         if self.client is None:
             raise RuntimeError("MQTT client is not connected. Call connect() first.")
 
-        result = self.client.publish(topic, msg)
+        result = self.client.publish(topic, msg, retain=retain)
         status = result[0]
         if status == 0:
             print(f"Sent `{msg}` to topic `{topic}`")
